@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-
+class m65816;
 
 struct State {
     uint16_t x;
@@ -41,6 +41,10 @@ struct State {
 
     // Extra flags
     bool emulation;
+
+    // Stored state while stepping
+    void (*stepfn)(m65816 &cpu);
+    int cycle;
 };
 
 class Bus {
