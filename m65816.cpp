@@ -99,8 +99,9 @@ static bool timing_1d(m65816 &cpu, int cycle) {
     }
 }
 
-template<bool fn(m65816, int)>
+template<bool (*fn)(m65816, int)>
 // template<std::function<bool (m65816 cpu, int cycle)>>
+//template<LiteralFn<bool(m65816, int), 128> &fn>
 static void Execute(m65816 &cpu) {
     int cycle = 2;
     while (!fn(cpu, cycle))
@@ -118,7 +119,8 @@ static void Step(m65816 &cpu) {
 
 
 //template<bool fn(m65816 &cpu, int cycle)>
-constexpr static int cycles(LiteralFn<bool(m65816, int), 128> &fn) {
+//constexpr static int cycles(LiteralFn<bool(m65816, int), 128> &fn) {
+constexpr static int cycles(bool (*fn)(m65816, int)) {
     int cycle = 2;
     m65816 cpu = {};
     cpu.state.p.x = 0;
@@ -144,58 +146,76 @@ static bool ora_fn(m65816 &cpu, int cycle) {
 struct Instruction {
     const char* name;
     void (*execute)(m65816 &cpu); // Function that executes full instruciton
-    void (*step)(m65816 &cpu); // Fuction that only executes a single cycle
+    //void (*step)(m65816 &cpu); // Fuction that only executes a single cycle
+    //std::function<void (m65816 &cpu)> execute;
+    //LiteralFn<void (m65816 &cpu)> execute;
     int cycle_count;
 
-    Instruction(char *name, LiteralFn<bool(m65816, int), 128> &fn)
+    constexpr Instruction() : name(""), cycle_count(0), execute(nullptr) {};
+
+    //Instruction(char *name, LiteralFn<bool(m65816, int), 128> &fn)
+    template<bool (*fn)(m65816, int)>
+    constexpr Instruction(char *name)
     : name(name),
       cycle_count(cycles(fn)) {
-        void (*e_fn)(m65816& cpu) = Execute<fn.ptr()>;
-        execute = e_fn;
-        step = Step<fn.ptr()>;
+        //void (*e_fn)(m65816& cpu) = (void (*)(m65816 &cpu))
+        execute = Execute<fn>;
+        //step = Step<fn>;
 
       }
 };
+
+using ReadFn = uint8_t(*)();
+using WriteFn = void(*)(uint8_t);
+
+template<bool (*fn)(m65816, int)>
+bool AbsoluteA(m65816, int) {
+
+}
+
+void
 
 const std::array<Instruction, 256> table = []() constexpr -> std::array<Instruction, 256>  {
     struct InstructionDef {
         const char* name;
         uint8_t op_base;
-        LiteralFn<void (State, ReadFn, WriteFn), 128> fn;
+        //LiteralFn<void (State, ReadFn, WriteFn), 128> fn;
+        void (*fn)(State, ReadFn, WriteFn);
     };
 
     std::array<InstructionDef, 8> universal = {
-        { "ORA", 0x00, [] (State state, ReadFn readfn, WriteFn writefn) { state.a |= readfn(); } },
-        { "AND", 0x20, [] (State state, ReadFn readfn, WriteFn writefn) { state.a &= readfn(); } },
-        { "EOR", 0x40, [] (State state, ReadFn readfn, WriteFn writefn) { state.a ^= readfn(); } },
-        { "ADC", 0x60, [] (State state, ReadFn readfn, WriteFn writefn) { uint16_t sum = state.a + readfn() + state.p.c;
-                                                                         state.a = sum & 0xff; state.p.c = !!(sum & 0x100); } },
-        { "STA", 0x80, [] (State state, ReadFn readfn, WriteFn writefn) { writefn(state.a); } },
-        { "LDA", 0xa0, [] (State state, ReadFn readfn, WriteFn writefn) { state.a = readfn(); } },
-        { "CMP", 0xc0, [] (State state, ReadFn readfn, WriteFn writefn) { compare(state.p, state.a, readfn()); } },
-        { "SBC", 0xe0, [] (State state, ReadFn readfn, WriteFn writefn) { substract_a(state, readfn()); },
+        { "ORA", 0x00, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { a |= readfn(); } },
+        { "AND", 0x20, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { a &= readfn(); } },
+        { "EOR", 0x40, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { a ^= readfn(); } },
+        { "ADC", 0x60, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { uint16_t sum = a + readfn() + state.p.c;
+                                                                         a = sum & 0xff; state.p.c = !!(sum & 0x100); } },
+        { "STA", 0x80, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { writefn(a); } },
+        { "LDA", 0xa0, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { a = readfn(); } },
+        //{ "CMP", 0xc0, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { compare(state.p, a, readfn()); } },
+        //{ "SBC", 0xe0, [] (State state, uint8_t &a, ReadFn readfn, WriteFn writefn) { substract_a(state, readfn()); },
     };
 
     std::array<Instruction, 256> T = {};
     for (auto &def : universal )
     {
-        T[def.op_base + 0x0d] = Instruction(def.name, AbsoluteA<def.fn>);        // a
-        T[def.op_base + 0x1d] = Instruction(def.name, AbsoluteA_X<def.fn>);      // a,x
-        T[def.op_base + 0x19] = Instruction(def.name, AbsoluteA_Y<def.fn>);      // a, y
-        T[def.op_base + 0x0f] = Instruction(def.name, Absolute_LongA<def.fn>);   // al
-        T[def.op_base + 0x1f] = Instruction(def.name, Absolute_LongA_X<def.fn>); // al,x
-        T[def.op_base + 0x05] = Instruction(def.name, Direct<def.fn>);           // d
-        T[def.op_base + 0x03] = Instruction(def.name, StackRelative<def.fn>);    // d,s
-        T[def.op_base + 0x15] = Instruction(def.name, DirectIndexedY<def.fn>);   // d,x
-        T[def.op_base + 0x12] = Instruction(def.name, DirectIndirect<def.fn>);     // (d)
-        T[def.op_base + 0x07] = Instruction(def.name, DirectIndirectLong<def.fn>); // [d]
-        T[def.op_base + 0x13] = Instruction(def.name, StackRelativeIndirectIndexed<def.fn>); // (d,s),y
-        T[def.op_base + 0x01] = Instruction(def.name, DirectIndexedIndirect<def.fn>);     // (d,x)
-        T[def.op_base + 0x11] = Instruction(def.name, DirectIndirectIndexed<def.fn>);     // (d),y
-        T[def.op_base + 0x17] = Instruction(def.name, DirectIndirectLongIndexed<def.fn>); // [d],y
-        if (def.op_base != 0x80) {
-            T[def.op_base + 0x09] = Instruction(def.name, Immediate<def.fn>);    // #
-        }
+        bool (*aa)(m65816, int) = AbsoluteA<def.fn>;
+        T[def.op_base + 0x0d] = Instruction<aa>(def.name);        // a
+        // T[def.op_base + 0x1d] = Instruction(def.name, AbsoluteA_X<def.fn>);      // a,x
+        // T[def.op_base + 0x19] = Instruction(def.name, AbsoluteA_Y<def.fn>);      // a, y
+        // T[def.op_base + 0x0f] = Instruction(def.name, Absolute_LongA<def.fn>);   // al
+        // T[def.op_base + 0x1f] = Instruction(def.name, Absolute_LongA_X<def.fn>); // al,x
+        // T[def.op_base + 0x05] = Instruction(def.name, Direct<def.fn>);           // d
+        // T[def.op_base + 0x03] = Instruction(def.name, StackRelative<def.fn>);    // d,s
+        // T[def.op_base + 0x15] = Instruction(def.name, DirectIndexedY<def.fn>);   // d,x
+        // T[def.op_base + 0x12] = Instruction(def.name, DirectIndirect<def.fn>);     // (d)
+        // T[def.op_base + 0x07] = Instruction(def.name, DirectIndirectLong<def.fn>); // [d]
+        // T[def.op_base + 0x13] = Instruction(def.name, StackRelativeIndirectIndexed<def.fn>); // (d,s),y
+        // T[def.op_base + 0x01] = Instruction(def.name, DirectIndexedIndirect<def.fn>);     // (d,x)
+        // T[def.op_base + 0x11] = Instruction(def.name, DirectIndirectIndexed<def.fn>);     // (d),y
+        // T[def.op_base + 0x17] = Instruction(def.name, DirectIndirectLongIndexed<def.fn>); // [d],y
+        // if (def.op_base != 0x80) {
+        //     T[def.op_base + 0x09] = Instruction(def.name, Immediate<def.fn>);    // #
+        // }
     }
 
     return T;

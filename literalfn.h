@@ -3,11 +3,9 @@
 
 template<class ReturnType, class...Xs>
 struct CallableBase {
-    using fnType = ReturnType(*)(Xs...);
     virtual ReturnType operator()(Xs...) const = 0;
     virtual ReturnType operator()(Xs...) = 0;
     virtual void copy(void*) const = 0;
-    virtual fnType ptr() = 0;
 };
 
 
@@ -31,11 +29,6 @@ struct Callable final
     virtual ReturnType operator()(Xs... xs) {
         return f(xs...);
     }
-
-    using fnType = ReturnType(*)(Xs...);
-    virtual fnType ptr() {
-        return &F::operator();
-    }
 };
 
 template<class F, class ReturnType, class...Xs>
@@ -56,11 +49,6 @@ struct CallablePtr final
 
     virtual ReturnType operator()(Xs... xs) {
         return f(xs...);
-    }
-
-    using fnType = ReturnType(*)(Xs...);
-    virtual fnType ptr() {
-        return f;
     }
 };
 
@@ -94,16 +82,17 @@ public:
 
     template<class...Ys>
     constexpr ReturnType operator()(Ys&&...ys) {
-        return (*reinterpret_cast<Base*>(memory))(std::forward<Ys>(ys)...);
+        if (allocated) {
+            return (*reinterpret_cast<Base*>(memory))(std::forward<Ys>(ys)...);
+        }
+        return {};
     }
 
     template<class...Ys>
     constexpr ReturnType operator()(Ys&&...ys)const {
-        return *reinterpret_cast<Base*>(memory)(std::forward<Ys>(ys)...);
-    }
-
-    using fnType = ReturnType(*)(Xs...);
-    virtual fnType ptr() {
-        return *reinterpret_cast<Base*>(memory)->ptr();
+        if (allocated) {
+            return *reinterpret_cast<Base*>(memory)(std::forward<Ys>(ys)...);
+        }
+        return {};
     }
 };
