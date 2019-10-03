@@ -4,6 +4,7 @@
 
 
 enum Opcode {
+    Not, // ~A
     Add, // A + B
     Sub, // A - B
     And, // A & B
@@ -12,6 +13,9 @@ enum Opcode {
     Shift, // A << b OR A >> -b
 
     Cat, // A << sizeof(B) | B
+
+    Eq,  // A == B
+    Neq, // A != B
 
     load48, // base, offset, cycle
     load32, // base, offset, cycle
@@ -113,6 +117,7 @@ struct IR_Const : public IR_Base {
     bool is() const { return id == op; }
 };
 
+using IR_Not = IR1<Opcode::Not>;
 using IR_Add = IR2<Opcode::Add>;
 using IR_Sub = IR2<Opcode::Sub>;
 using IR_And = IR2<Opcode::And>;
@@ -126,6 +131,8 @@ using IR_Const16 = IR_Const<16, false>;
 using IR_Const24 = IR_Const<24, false>;
 using IR_Const32 = IR_Const<32, false>;
 using IR_Load8 = IR3<Opcode::load8>;
+using IR_Neq = IR2<Opcode::Neq>;
+using IR_Eq  = IR2<Opcode::Neq>;
 
 
 static_assert(sizeof(IR_Add) == sizeof(IR_Base));
