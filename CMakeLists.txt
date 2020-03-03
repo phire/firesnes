@@ -6,7 +6,7 @@ enable_testing()
 
 
 
-add_executable(firesnes main.cpp m65816.cpp)
+add_executable(firesnes main.cpp m65816.cpp m65816_addressing.cpp)
 
 set_property(TARGET firesnes PROPERTY CXX_STANDARD 17)
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})

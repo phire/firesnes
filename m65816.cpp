@@ -1,144 +1,13 @@
-#include "m65816.h"
-#include "literalfn.h"
 #include <stdio.h>
 #include <array>
 #include <functional>
-#include <map>
 #include <vector>
 
+#include "m65816_emitter.h"
+#include "m65816.h"
 #include "ir_base.h"
 
-enum Reg {
-    A,
-    B,
-    D,
-    X,
-    Y,
-    S,
-    PC,
-    PBR,
-    DBR,
-    Flag_N, // Negative
-    Flag_V, // Overflow
-    Flag_M, // Accumulator register size (0 == 16 bit)
-    Flag_X, // Index register size       (1 ==  8 bit)
-    Flag_D, // Decimal
-    Flag_I, // IRQ disable
-    Flag_Z, // Zero
-    Flag_C, // Carry
-    Flag_E, // Emulation mode
-    Flag_B, // Break
-    CYCLE, // Not a register, but lets pretend.
-    ALIVE, // also not a register. But this has to be represented somehow
-};
-
-class Emitter {
-    std::vector<IR_Base> buffer;
-
-    ssa push(IR_Base&& ir) {
-        buffer.push_back(std::move(ir));
-        return { u16(buffer.size() - 1) };
-    }
-    ssa bus_a;
-
-public:
-    std::map<Reg, ssa> state;
-
-    template<u8 bits>
-    ssa Const(u32 a) {
-        return push(IR_Const<bits, false>(a));
-    }
-
-    ssa IncPC() {
-        return state[PC] = Add(state[PC], 1);
-    }
-    ssa IncCycle() {
-        return state[CYCLE] = Add(state[CYCLE], 1);
-    }
-    ssa Shift(ssa a, ssa b) {
-        return push(IR_Shift(a, b));
-    }
-    ssa Shift(ssa a, int b) {
-        return Shift(a, push(IR_Const32(b)));
-    }
-    ssa Not(ssa a) {
-        return push(IR_Not(a));
-    }
-    ssa And(ssa a, ssa b) {
-        return push(IR_And(a, b));
-    }
-    ssa Or(ssa a, ssa b) {
-        return push(IR_Or(a, b));
-    }
-    ssa Xor(ssa a, ssa b) {
-        return push(IR_Xor(a, b));
-    }
-    ssa Cat(ssa a, ssa b) {
-        return push(IR_Cat(a, b));
-    }
-    ssa Zext16(ssa a) { return a; } // FIXME
-    ssa Zext32(ssa a) { return a; } // FIXME
-
-    ssa memState(ssa bus) {
-        // state[ALIVE] allows us to disable memory operations when this codepath is dead.
-        return push(IR_MemState(bus, state[CYCLE], state[ALIVE]));
-    }
-
-    ssa Read(ssa addr) {
-        return push(IR_Load8(memState(bus_a), addr));
-    }
-    void Write(ssa addr, ssa value) {
-        push(IR_Store8(memState(bus_a), addr, value));
-    }
-
-    ssa Add(ssa a, ssa b) {
-        return push(IR_Add(a, b));
-    }
-    ssa Add(ssa a, int b) {
-        return Add(a, push(IR_Const32(b)));
-    }
-    ssa Sub(ssa a, ssa b) {
-        return push(IR_Sub(a, b));
-    }
-
-    ssa Ternary(ssa cond, ssa a, ssa b) {
-        return push(IR_Ternary(cond, a, b));
-    }
-    ssa Neq(ssa a, ssa b) {
-        return push(IR_Neq(a, b));
-    }
-    ssa Eq(ssa a, ssa b) {
-        return push(IR_Eq(a, b));
-    }
-    void If(ssa cond, std::function<void()> then) {
-        std::map<Reg, ssa> old_state = state; // Copy state
-
-        then();
-
-        // Scan for differences in old and new state
-        for(auto & [key, new_val]: state) {
-            auto &old_val = old_state[key];
-            if (old_val.offset != new_val.offset) {
-                // Insert a ternary operation where the state differs.
-                new_val = Ternary(cond, old_state[key], new_val);
-            }
-        }
-    }
-};
-
-static ssa ReadPc(Emitter& e) {
-    ssa data = e.Read(e.Cat(e.state[PBR], e.state[PC]));
-    e.IncPC();
-    e.IncCycle();
-    return data;
-}
-
-static ssa ReadPc16(Emitter& e) {
-    ssa data_low = ReadPc(e);
-    ssa data_high = ReadPc(e);
-    ssa data = e.Cat(data_high, data_low);
-    return data;
-}
+namespace m65816 {
 
 // Reads 8 or 16 bytes from PC depending on the Reg register
 static ssa ReadPc(Emitter& e, Reg reg) {
@@ -245,119 +114,6 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
     // Writeback Low
     e.Write(address, e.And(result, e.Const<16>(255)));
     e.IncCycle();
-}
-
-// Adds one of the index registers (X or Y) to the address.
-// handles adds extra cycles when required by page cross or the X flag.
-ssa AddIndexReg(Emitter& e, Reg reg, ssa address) {
-    ssa index = e.state[reg];
-    ssa new_address = e.Add(address, index);
-
-    // See if the upper bits change
-    ssa mask = e.Const<16>(0xff00);
-    ssa page_cross = e.Neq(e.And(new_address, mask), e.And(address,mask));
-
-     // Takes an extra cycle when index is 16bit or an 8bit index crosses a page boundary
-     e.If(e.Or(page_cross, e.Not(e.state[Flag_X])), [&] {
-         // TODO: Dummy read to DBR,AAH,AAL+XL
-         e.IncCycle();
-     });
-
-    return new_address;
-}
-
-static ssa Absolute(Emitter& e) {
-    return e.Cat(e.state[DBR], ReadPc16(e));
-}
-
-static ssa AbsoluteLong(Emitter& e) {
-    ssa low = ReadPc16(e);
-    ssa high = ReadPc(e);
-    return e.Cat(high, low);
-}
-
-template<Reg indexreg>
-static ssa AbsoluteIndex(Emitter& e) {
-    return e.Cat(e.state[DBR], AddIndexReg(e, indexreg, ReadPc16(e)));
-}
-
-static ssa AbsoluteLongX(Emitter& e) {
-    return e.Add(AbsoluteLong(e), e.Cat(e.Const<8>(0), e.state[X]));
-}
-
-static ssa Direct(Emitter& e) {
-    ssa offset = ReadPc(e);
-    ssa overflow = e.Neq(e.Const<16>(0x0000), e.And(e.state[D], e.Const<16>(0x00ff)));
-
-    // FIXME: Docs seem to conflict about if this overflow cycle penalty goes away in 16bit mode too
-    e.If(overflow, [&] {
-        // TODO: Dummy read to PBR,PC+1
-        e.IncCycle();
-    });
-
-    return e.Cat(e.Const<8>(0), e.Add(e.state[D], offset));
-}
-
-template<Reg indexreg>
-static ssa DirectIndex(Emitter e) {
-    ssa offset = ReadPc(e);
-    ssa overflow = e.Neq(e.Const<16>(0x0000), e.And(e.state[D], e.Const<16>(0x00ff)));
-    ssa wrap = e.And(e.Not(overflow), e.state[Flag_E]);
-
-    ssa wrapped = e.Or(e.And(e.state[D], e.Const<16>(0xff00)), e.And(e.Const<16>(0x00ff), e.Add(e.state[indexreg], offset)));
-    ssa overflowed = e.Add(e.state[indexreg], offset);
-    ssa address = e.Ternary(wrap, wrapped, overflowed);
-
-    // TODO: Dummy read to PBR,PC+1
-    e.IncCycle(); // Cycle to do add
-
-    e.If(overflow, [&] {
-        // TODO: Dummy read to PBR,PC+1
-        e.IncCycle(); // Cycle to continue add
-    });
-
-    return e.Cat(e.Const<8>(0), e.Add(e.state[D], address));
-}
-
-static ssa IndirectDirect(Emitter e) {
-    ssa location = Direct(e);
-    e.IncCycle();
-
-    ssa address_low = e.Read(location);
-    ssa location_next = e.Add(location, 1);
-
-    e.IncCycle();
-
-    ssa address_high = e.Read(location_next);
-
-    return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
-}
-
-static ssa IndirectDirectLong(Emitter e) {
-    ssa location = Direct(e);
-    e.IncCycle();
-
-    ssa address_low = e.Read(location);
-    ssa location_next = e.Add(location, 1);
-    ssa location_next_next = e.Add(location, 2);
-
-    e.IncCycle();
-    ssa address_high = e.Read(location_next);
-
-    e.IncCycle();
-
-    ssa address_highest = e.Read(location_next_next);
-
-    return e.Cat(address_highest, e.Cat(address_high, address_low));
-}
-
-static ssa StackRelative(Emitter e) {
-    ssa offset = ReadPc16(e);
-
-    // TODO: Dummy read to PBR,PC+1
-    e.IncCycle(); // Internal cycle to do add
-
-    return e.Add(e.state[S], offset);
 }
 
 static void add_carry(Emitter e, ssa& dst, ssa val) {
@@ -514,6 +270,8 @@ void populate_tables() {
     // CPY  c4      cc      --       --        c0
     // CPX  e4      ec      --       --        e0
 
+    // NOTE: Index registers are swapped.
+
     {
         enum idxmem_type {
             STORE,
@@ -537,9 +295,9 @@ void populate_tables() {
             apply(0x0c, Absolute);
 
             if (type != CMP)
-                apply(0x14, DirectIndex<X>);
+                apply(0x14, reg == X ? DirectIndex<Y> : DirectIndex<X>);
             if (type == LOAD)
-                apply(0x1c, AbsoluteIndex<X>);
+                apply(0x1c, reg == X ? AbsoluteIndex<Y> : AbsoluteIndex<X>);
             if (type == LOAD)
                 insert(op_base + 0x00, name, [&] (Emitter& e) { e.state[reg] = ReadPcX(e);  });
             if (type == CMP)
@@ -554,12 +312,11 @@ void populate_tables() {
         idxmem("CPX", 0xe0, CMP,   X);
     }
 
-
-    // Store Zero kind of fits into the above pattern if you squint.
-    // But its cleanly been stuffed into free slots.
-
     // STZ  dir     abs     dir,X    abs,X
     //      64      9c      74       9e
+
+    // Store Zero kind of fits into the above Index<-->Memory pattern if you squint.
+    // But its cleanly been stuffed into free slots.
 
     {
         auto stz = [&] (size_t opcode, std::function<ssa(Emitter&)> address_fn) {
@@ -571,11 +328,26 @@ void populate_tables() {
         stz(0x9e, AbsoluteIndex<X>);
     }
 
-    // Operations on Index
-    // INX  e8
+    // Implied Operations on Index:
+    // DEY  88
     // INY  c8
     // DEX  ca
-    // DEY  88
+    // INX  e8
+
+    auto inc = [&] (const char* name, size_t opcode, Reg index, int dir) {
+        insert(opcode, name, [&] (Emitter& e) {
+            ssa mask = e.Const<32>(0xffff); // Always 16bit
+            e.state[X] = e.And(e.Add(e.state[X], e.Const<32>(dir)), mask);
+
+            // TODO: Dummy read to PC + 1
+            e.IncCycle(); // Internal operation;
+        } );
+    };
+
+    inc("DEY", 0x88, Y, -1);
+    inc("INY", 0xc8, Y,  1);
+    inc("DEX", 0xca, X, -1);
+    inc("INX", 0xe8, X,  1);
 
     // Transfer operations:
     // TXA  8a
@@ -602,14 +374,6 @@ void populate_tables() {
         });
     };
 
-    auto swap = [&] (const char* name, size_t opcode, Reg a, Reg b) {
-        insert(opcode, name, [&] (Emitter& e) {
-            ssa c = e.state[a];
-            e.state[a] = e.state[b];
-            e.state[b] = c;
-            e.IncCycle();
-         });
-    };
 
     move("TXA", 0x8a, X, A);
     move("TYA", 0x98, Y, A);
@@ -638,6 +402,15 @@ void populate_tables() {
     movetoC(  "TDC", 0x7b, D);
     movetoC(  "TSC", 0x3b, S);
 
+    auto swap = [&] (const char* name, size_t opcode, Reg a, Reg b) {
+        insert(opcode, name, [&] (Emitter& e) {
+            ssa c = e.state[a];
+            e.state[a] = e.state[b];
+            e.state[b] = c;
+            e.IncCycle();
+         });
+    };
+
     // XBA -- swap B and A
     swap("XBA", 0xeb, B, A); // TODO: flags????!!!
     // XCE -- swap carry and emu
@@ -648,14 +421,12 @@ void populate_tables() {
 
 }
 
+}
 
-
-
-
-void m65816::run_for(int cycles) {
+int main(int, char**) {
     printf("test\n");
 
-    populate_tables();
+    m65816::populate_tables();
 
     int count = 255;
 
@@ -669,9 +440,9 @@ void m65816::run_for(int cycles) {
         printf ("\n0x%x  ", i);
         for(int j = 0; j < 16; j++) {
             int op = i << 4 | j;
-            printf("%5s ", name_table[op].c_str());
+            printf("%5s ", m65816::name_table[op].c_str());
 
-            if(name_table[op] == "") {
+            if(m65816::name_table[op] == "") {
                 count--;
             }
         }
