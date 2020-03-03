@@ -17,15 +17,15 @@ enum Opcode {
     Eq,  // A == B
     Neq, // A != B
 
-    load48, // base, offset, cycle
-    load32, // base, offset, cycle
-    load16, // base, offset, cycle
-    load8,  // base, offset, cycle
-    storearg, // base, offset -- To pack 4 args into store.
-    store48, // storearg, data, cycle
-    store32, // storearg, data, cycle
-    store16, // storearg, data, cycle
-    store8,  // storearg, data, cycle
+    memState, // base, cycle, validness (if this SSA node is dead, then the memory operation doesn't exist)
+    load48, // mem, offset
+    load32, // mem, offset
+    load16, // mem, offset
+    load8,  // mem, offset
+    store48, // mem, offset, data
+    store32, // mem, offset, data
+    store16, // mem, offset, data
+    store8,  // mem, offset, data
 
     ternary, // condition, true, false
 
@@ -130,7 +130,9 @@ using IR_Const8  = IR_Const<8,  false>;
 using IR_Const16 = IR_Const<16, false>;
 using IR_Const24 = IR_Const<24, false>;
 using IR_Const32 = IR_Const<32, false>;
-using IR_Load8 = IR3<Opcode::load8>;
+using IR_MemState = IR3<Opcode::memState>;
+using IR_Load8 = IR2<Opcode::load8>;
+using IR_Store8 = IR3<Opcode::store8>;
 using IR_Neq = IR2<Opcode::Neq>;
 using IR_Eq  = IR2<Opcode::Neq>;
 
