@@ -27,6 +27,7 @@ enum Reg {
     Flag_B, // Break
     CYCLE, // Not a register, but lets pretend.
     ALIVE, // also not a register. But this has to be represented somehow
+    NUM_REGS
 };
 
 class Emitter;

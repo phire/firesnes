@@ -9,6 +9,78 @@
 
 namespace m65816 {
 
+Emitter::Emitter() {
+    ssa null = Const<32>(0);
+    regs = push(IR_MemState(null, null, null));
+    auto reg8 =  [&] (Reg r) { return push(IR_Load8( regs, Const<32>(r))); };
+    auto reg16 = [&] (Reg r) { return push(IR_Load16(regs, Const<32>(r))); };
+    auto reg64 = [&] (Reg r) { return push(IR_Load64(regs, Const<32>(r))); };
+
+    // Create SSA nodes for all state regs
+    state[A]      = reg8(A);
+    state[B]      = reg8(B);
+    state[D]      = reg16(D);
+    state[X]      = reg16(X);
+    state[Y]      = reg16(Y);
+    state[S]      = reg16(S);
+    state[PC]     = reg16(PC);
+    state[DBR]    = reg8(DBR);
+    state[PBR]    = reg8(PBR);
+    state[Flag_N] = reg64(Flag_N);
+    state[Flag_V] = reg64(Flag_V);
+    state[Flag_M] = reg64(Flag_M);
+    state[Flag_X] = reg64(Flag_X);
+    state[Flag_D] = reg64(Flag_D);
+    state[Flag_I] = reg64(Flag_I);
+    state[Flag_Z] = reg64(Flag_Z);
+    state[Flag_C] = reg64(Flag_C);
+    state[Flag_E] = reg64(Flag_E);
+    state[Flag_B] = reg64(Flag_B);
+    state[CYCLE]  = reg64(CYCLE);
+    state[ALIVE]  = null; // Never actually read.
+
+    //
+    initializer_end_marker = buffer.size();
+
+    bus_a = Const<32>(1);
+}
+
+template<u8 bits> void Emitter::finaliseReg(Reg reg) {
+    // We only want to write regs which have changed
+    if (state[reg].offset >= initializer_end_marker) {
+        ssa offset = Const<32>(reg);
+
+        if constexpr(bits ==  8) push( IR_Store8(regs, offset, state[reg]));
+        if constexpr(bits == 16) push(IR_Store16(regs, offset, state[reg]));
+        if constexpr(bits == 64) push(IR_Store64(regs, offset, state[reg]));
+    }
+}
+
+void Emitter::Finalize() {
+    finaliseReg<8>(A);
+    finaliseReg<8>(B);
+    finaliseReg<16>(D);
+    finaliseReg<16>(X);
+    finaliseReg<16>(Y);
+    finaliseReg<16>(S);
+    finaliseReg<16>(PC);
+    finaliseReg<8>(DBR);
+    finaliseReg<8>(PBR);
+    finaliseReg<64>(Flag_N);
+    finaliseReg<64>(Flag_V);
+    finaliseReg<64>(Flag_M);
+    finaliseReg<64>(Flag_X);
+    finaliseReg<64>(Flag_D);
+    finaliseReg<64>(Flag_I);
+    finaliseReg<64>(Flag_Z);
+    finaliseReg<64>(Flag_C);
+    finaliseReg<64>(Flag_E);
+    finaliseReg<64>(Flag_B);
+    finaliseReg<64>(CYCLE);
+
+    // Todo: how to handle alive?
+}
+
 // Reads 8 or 16 bytes from PC depending on the Reg register
 static ssa ReadPc(Emitter& e, Reg reg) {
     ssa low = ReadPc(e);
@@ -63,11 +135,19 @@ static void ApplyIndexOperation(Emitter& e, inner_fn operation, ssa address) {
 }
 
 static void ApplyImmediate(Emitter& e, inner_fn operation) {
-    operation(e, e.state[A], ReadPc(e));
+    ssa immediate_address = e.Cat(e.state[PBR], e.state[PC]);
+    e.IncPC();
+    e.IncCycle();
+
+    operation(e, e.state[A], immediate_address);
+    e.IncCycle();
+
+    immediate_address = e.Add(immediate_address, e.Const<24>(1));
+    e.IncPC();
     e.IncCycle();
 
     e.If(e.Not(e.state[Flag_M]), [&] () {
-        operation(e, e.state[B], ReadPc(e));
+        operation(e, e.state[B], immediate_address);
         e.IncCycle();
     });
 }
@@ -149,7 +229,7 @@ void populate_tables() {
 
     auto universal = [&] (const char* name, size_t op_base, inner_fn fn) {
         auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-            insert(op_base | sub_op, name, [&] (Emitter& e) { ApplyMemoryOperation(e, fn, address_fn(e)); });
+            insert(op_base | sub_op, name, [fn, address_fn] (Emitter& e) {ApplyMemoryOperation(e, fn, address_fn(e)); });
         };
 
         apply(0x0d, Absolute);              // a
@@ -167,7 +247,7 @@ void populate_tables() {
         // T[def.op_base + 0x11] = Instruction(def.name, DirectIndirectIndexed<def.fn>);     // (d),y
         // T[def.op_base + 0x17] = Instruction(def.name, DirectIndirectLongIndexed<def.fn>); // [d],y
         if (std::string(name) != "STA") { // Can't store to an immidate
-            insert(op_base + 0x09, name, [&] (Emitter& e) { ApplyImmediate(e, fn); });
+            insert(op_base + 0x09, name, [fn] (Emitter& e) { ApplyImmediate(e, fn); });
         }
     };
 
@@ -197,7 +277,7 @@ void populate_tables() {
 
     auto rwm = [&] (const char* name, size_t op_base, rmw_fn fn) {
         auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-            insert(op_base + sub_op, name, [&] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
+            insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
         };
 
         apply(0x06, Direct);
@@ -230,7 +310,7 @@ void populate_tables() {
 
     auto bit = [&] (const char* name, size_t op_base, rmw_fn fn) {
         auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-            insert(op_base + sub_op, name, [&] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
+            insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
         };
 
         apply(0x04, Direct);
@@ -249,7 +329,7 @@ void populate_tables() {
     bit("BIT", 0x20, [] (Emitter& e, ssa val) { /* do flags; */ return val; });
 
     // Bit #imm is diffrent. Doesn't fit with the above encoding and does flags differently.
-    insert(0x89, "BIT", [&] (Emitter e) {
+    insert(0x89, "BIT", [] (Emitter e) {
         auto value = ReadPcM(e);
         auto acc_high = e.Ternary(e.state[Flag_M], e.Const<8>(0), e.state[B]);
         auto acc = e.Cat(acc_high, e.state[A]);
@@ -288,7 +368,7 @@ void populate_tables() {
             }
 
             auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-                insert(op_base + sub_op, name, [&] (Emitter& e) { ApplyMemoryOperation(e, fn, address_fn(e)); });
+                insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyMemoryOperation(e, fn, address_fn(e)); });
             };
 
             apply(0x04, Direct);
@@ -299,9 +379,9 @@ void populate_tables() {
             if (type == LOAD)
                 apply(0x1c, reg == X ? AbsoluteIndex<Y> : AbsoluteIndex<X>);
             if (type == LOAD)
-                insert(op_base + 0x00, name, [&] (Emitter& e) { e.state[reg] = ReadPcX(e);  });
+                insert(op_base + 0x00, name, [reg] (Emitter& e) { e.state[reg] = ReadPcX(e);  });
             if (type == CMP)
-                insert(op_base + 0x00, name, [&] (Emitter& e) { ReadPcX(e); /* flags */ });
+                insert(op_base + 0x00, name, [] (Emitter& e) { ReadPcX(e); /* flags */ });
         };
 
         idxmem("STY", 0x80, STORE, Y);
@@ -320,7 +400,7 @@ void populate_tables() {
 
     {
         auto stz = [&] (size_t opcode, std::function<ssa(Emitter&)> address_fn) {
-            insert(opcode, "STZ", [&] (Emitter& e) { e.Write(address_fn(e), e.Const<8>(0)); e.IncCycle();});
+            insert(opcode, "STZ", [address_fn] (Emitter& e) { e.Write(address_fn(e), e.Const<8>(0)); e.IncCycle();});
         };
         stz(0x64, Direct);
         stz(0x9c, Absolute);
@@ -366,7 +446,7 @@ void populate_tables() {
 
     auto move = [&] (const char* name, size_t opcode, Reg src, Reg dst, bool flags = true) {
         // TODO: Flags!
-        insert(opcode, name, [&] (Emitter& e) {
+        insert(opcode, name, [src, dst] (Emitter& e) {
             ssa val = e.state[src];
             ssa truncate = e.state[Flag_M]; // Truncate to 8 bits when M is set
             e.state[dst] = e.Ternary(truncate, e.And(val, e.Const<32>(0xff)), val);
@@ -386,11 +466,11 @@ void populate_tables() {
 
     auto movefromC = [&] (const char* name, size_t opcode, Reg dst) {
         // Always transfer as 16bits
-        insert(opcode, name, [&] (Emitter& e) { e.state[dst] = e.Cat(e.state[B], e.state[A]); e.IncCycle(); });
+        insert(opcode, name, [dst] (Emitter& e) { e.state[dst] = e.Cat(e.state[B], e.state[A]); e.IncCycle(); });
     };
     auto movetoC = [&] (const char* name, size_t opcode, Reg src) {
         // Always transfer as 16bits
-        insert(opcode, name, [&] (Emitter& e) {
+        insert(opcode, name, [src] (Emitter& e) {
             e.state[A] = e.And(e.state[src], e.Const<32>(0xff));
             e.state[B] = e.Shift(e.state[src], 8);
             e.IncCycle();
@@ -403,7 +483,7 @@ void populate_tables() {
     movetoC(  "TSC", 0x3b, S);
 
     auto swap = [&] (const char* name, size_t opcode, Reg a, Reg b) {
-        insert(opcode, name, [&] (Emitter& e) {
+        insert(opcode, name, [a, b] (Emitter& e) {
             ssa c = e.state[a];
             e.state[a] = e.state[b];
             e.state[b] = c;
@@ -421,6 +501,15 @@ void populate_tables() {
 
 }
 
+
+void emit(Emitter& e, u8 opcode) {
+    // The opcode always gets baked into the IR trace, so we need emit code to check it hasn't changed
+    ssa runtime_opcode = ReadPc(e);
+    e.Assert(runtime_opcode, e.Const<8>(opcode));
+
+    gen_table[opcode](e);
+}
+
 }
 
 int main(int, char**) {
@@ -436,6 +525,8 @@ int main(int, char**) {
         printf("  0x%x ", i);
     }
 
+    m65816::Emitter e;
+
     for(int i = 0; i < 16; i++) {
         printf ("\n0x%x  ", i);
         for(int j = 0; j < 16; j++) {
@@ -444,9 +535,49 @@ int main(int, char**) {
 
             if(m65816::name_table[op] == "") {
                 count--;
+            } else {
+                //m65816::emit(e, op);
             }
         }
     }
 
     printf("\n\n\t\t%i/255\n", count);
+
+    m65816::emit(e,  0xe9);
+
+    e.Finalize();
+
+    auto code = e.buffer;
+
+    auto printarg = [&] (u16 arg) {
+        // exclude null args
+        if (arg == 0xffff) return;
+
+        IR_Base ir = code[arg];
+
+        if (ir.is<IR_Const32>()) {
+            auto value = ir.cast<IR_Const32>();
+            printf(" %c%i(%i)", value->is_signed ? 's' : 'u', value->num_bits, value->arg_32);
+        }
+        else {
+            printf(" ssa%i", arg);
+        }
+    };
+
+    for (int i = 0; i < code.size(); i++) {
+        IR_Base ir = code[i];
+        if (ir.id < 0x8000) {
+            printf("% 3i: %s", i, OpcodeName(ir.id));
+            printarg(ir.arg_1);
+            printarg(ir.arg_2);
+            printarg(ir.arg_3);
+            printf("\n");
+        } else if (ir.id == 0x8000) {
+            printf("const48 %x\n", ir.arg_48);
+        } else if (ir.id == Const) {
+            // Don't print consts, because printarg inlines them
+            //printf("const%i %x\n", ir.num_bits, ir.arg_32);
+        }
+    }
+
 }

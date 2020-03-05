@@ -21,20 +21,54 @@ enum Opcode {
     Neq, // A != B
 
     memState, // base, cycle, validness (if this SSA node is dead, then the memory operation doesn't exist)
-    load48, // mem, offset
+    load64, // mem, offset
     load32, // mem, offset
     load16, // mem, offset
     load8,  // mem, offset
-    store48, // mem, offset, data
+    store64, // mem, offset, data
     store32, // mem, offset, data
     store16, // mem, offset, data
     store8,  // mem, offset, data
 
+
+
     ternary, // condition, true, false
+
+
+    assert, // value, expected
 
     Const48 = 0x8000,
     Const,
 };
+
+inline const char* OpcodeName(u16 op) {
+    switch (op) {
+    case Not: return "Not";
+    case Add: return "Add";
+    case Sub: return "Sub";
+    case And: return "And";
+    case Or: return "Or";
+    case Xor: return "Xor";
+    case Shift: return "Shift";
+    case Cat: return "Cat";
+    case Eq: return "Eq";
+    case Neq: return "Neq";
+    case memState: return "memState";
+    case load64: return "load64";
+    case load32: return "load32";
+    case load16: return "load16";
+    case load8: return "load8";
+    case store64: return "store64";
+    case store32: return "store32";
+    case store16: return "store16";
+    case store8: return "store8";
+    case ternary: return "ternary";
+    case assert: return "assert";
+    case Const48: return "Const48";
+    case Const: return "Const";
+    default: return "<error>";
+    }
+}
 
 struct ssa {
     u16 offset;
@@ -71,16 +105,16 @@ struct IR_Base {
     IR_Base(u16 id, u64 a) : IR_Base(id) { arg_48 = a; }
 
     template<typename T>
-    bool is() {
-        T& ret = static_cast<T>(this);
-        return ret.is();
+    bool is() const {
+        const T *ret = reinterpret_cast<const T*>(this);
+        return ret->is();
     }
 
     template<typename T>
-    std::optional<T&> cast() {
-        T& ret = static_cast<T>(this);
-        if (ret.is()) {
-            return { ret };
+    std::optional<T> cast() {
+        T *ret = reinterpret_cast<T*>(this);
+        if (ret->is()) {
+            return { *ret };
         }
         return {};
     }
@@ -112,12 +146,12 @@ struct IR3 : public IR_Base {
     bool is() const { return id == op; }
 };
 
-template<u8 num_bits, bool is_signed>
+template<u8 bits, bool _signed>
 struct IR_Const : public IR_Base {
-    const Opcode op = Opcode::Const;
+    //IR_Const(const IR_Base *base) { hex = base->hex; }
     template<typename T>
-    IR_Const(T i) : IR_Base(op, num_bits, is_signed, u32(i)) { static_assert(sizeof(T) <= sizeof(u32)); }
-    bool is() const { return id == op; }
+    IR_Const(T i) : IR_Base(Opcode::Const, bits, _signed, u32(i)) { static_assert(sizeof(T) <= sizeof(u32)); }
+    bool is() const { return id == Opcode::Const; }
 };
 
 using IR_Not = IR1<Opcode::Not>;
@@ -135,12 +169,20 @@ using IR_Const24 = IR_Const<24, false>;
 using IR_Const32 = IR_Const<32, false>;
 using IR_MemState = IR3<Opcode::memState>;
 using IR_Load8 = IR2<Opcode::load8>;
+using IR_Load16 = IR2<Opcode::load16>;
+using IR_Load32 = IR2<Opcode::load32>;
+using IR_Load64 = IR2<Opcode::load64>;
 using IR_Store8 = IR3<Opcode::store8>;
+using IR_Store16 = IR3<Opcode::store16>;
+using IR_Store32 = IR3<Opcode::store32>;
+using IR_Store64 = IR3<Opcode::store64>;
+using IR_Assert = IR2<Opcode::assert>;
 using IR_Neq = IR2<Opcode::Neq>;
-using IR_Eq  = IR2<Opcode::Neq>;
+using IR_Eq  = IR2<Opcode::Eq>;
 
 
 static_assert(sizeof(IR_Add) == sizeof(IR_Base));
+static_assert(sizeof(IR_Const32) == sizeof(IR_Base));
 
 /*struct IR_Add : public IR_Base {
     const Opcode op = Opcode::Add;

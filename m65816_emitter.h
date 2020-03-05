@@ -10,15 +10,24 @@
 namespace m65816 {
 
 class Emitter {
-    std::vector<IR_Base> buffer;
-
     ssa push(IR_Base&& ir) {
         buffer.push_back(std::move(ir));
         return { u16(buffer.size() - 1) };
     }
     ssa bus_a;
+    ssa regs;
+
+    size_t initializer_end_marker;
+
+    template<u8 bits>
+    void finaliseReg(Reg r);
 
 public:
+    std::vector<IR_Base> buffer;
+
+    Emitter();
+    void Finalize();
+
     std::map<Reg, ssa> state;
 
     template<u8 bits>
@@ -66,6 +75,10 @@ public:
     }
     void Write(ssa addr, ssa value) {
         push(IR_Store8(memState(bus_a), addr, value));
+    }
+
+    void Assert(ssa a, ssa b) {
+        push(IR_Assert(a, b));
     }
 
     ssa Add(ssa a, ssa b) {
