@@ -2,6 +2,7 @@
 #include <array>
 #include <functional>
 #include <vector>
+#include <cassert>
 
 #include "m65816_emitter.h"
 #include "m65816.h"
@@ -523,7 +524,7 @@ void emit(Emitter& e, u8 opcode) {
 
 void interpeter_loop() {
 
-
+/*
     memory[0xc000] = 0xa2;
     memory[0xc001] = 0x00;
     memory[0xc002] = 0x86;
@@ -534,10 +535,12 @@ void interpeter_loop() {
     memory[0xc007] = 0x11;
     memory[0xc008] = 0xea;
     memory[0xc008] = 0xea;
+    */
 
     // Initial register state
     registers[m65816::Flag_M] = 1;
     registers[m65816::Flag_X] = 1;
+    registers[m65816::Flag_E] = 1;
 
     u32 pc = 0xc000;
     m65816::Emitter e(pc);
@@ -577,6 +580,23 @@ void interpeter_loop() {
 
 }
 
+void load_nestest() {
+    FILE *f = fopen("nestest.nes", "rb");
+    assert(f > 0);
+
+    fseek(f, 16, SEEK_SET); // Skip header
+
+    // Read 16 kilobytes to memory[0xc000]
+    for (int i = 0; i < 0x4000; i++) {
+        char byte;
+        fread(&byte, 1, 1, f);
+        memory[0xc000 + i] = byte;
+        memory[0x8000 + i] = byte; // And it's mirror
+    }
+
+    fclose(f);
+}
+
 int main(int, char**) {
     printf("test\n");
 
@@ -607,6 +627,8 @@ int main(int, char**) {
     }
 
     printf("\n\n\t\t%i/255\n", count);
+
+    load_nestest();
 
     interpeter_loop();
     return 0;
