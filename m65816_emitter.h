@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <functional>
+#include <utility>
 
 namespace m65816 {
 
@@ -24,6 +25,8 @@ class Emitter {
     template<u8 bits>
     void finaliseReg(Reg r);
 
+    std::map<u64, ssa> consts_cache;
+
 public:
     std::vector<IR_Base> buffer;
 
@@ -34,7 +37,15 @@ public:
 
     template<u8 bits>
     ssa Const(u32 a) {
-        return push(IR_Const<bits, false>(a));
+        // Cache constants to make our IR smaller
+        u64 index = a | u64(bits) << 32;
+
+        if (consts_cache.find(index) != consts_cache.end()) {
+            return consts_cache[index];
+        }
+        ssa constant = push(IR_Const<bits, false>(a));
+        consts_cache[index] = constant;
+        return constant;
     }
 
     ssa IncPC() {
@@ -47,13 +58,13 @@ public:
         return push(IR_ShiftLeft(a, b));
     }
     ssa ShiftLeft(ssa a, int b) {
-        return ShiftLeft(a, push(IR_Const32(b)));
+        return ShiftLeft(a, Const<32>(b));
     }
     ssa ShiftRight(ssa a, ssa b) {
         return push(IR_ShiftRight(a, b));
     }
     ssa ShiftRight(ssa a, int b) {
-        return ShiftRight(a, push(IR_Const32(b)));
+        return ShiftRight(a, Const<32>(b));
     }
     ssa Not(ssa a) {
         return push(IR_Not(a));
@@ -96,7 +107,7 @@ public:
         return push(IR_Add(a, b));
     }
     ssa Add(ssa a, int b) {
-        return Add(a, push(IR_Const32(b)));
+        return Add(a, Const<32>(b));
     }
     ssa Sub(ssa a, ssa b) {
         return push(IR_Sub(a, b));
