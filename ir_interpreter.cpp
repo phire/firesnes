@@ -46,6 +46,11 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             assert(false);
         };
 
+        auto mem_cond = [&] () {
+            auto mem_ir = irlist[ir.arg_1];
+            return ssalist[mem_ir.arg_3];
+        };
+
         auto printarg = [&] (u16 arg) {
             // exclude null args
             if (arg == 0xffff) return;
@@ -164,47 +169,63 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             break;
 
         case load8: { // mem, offset
-            u64 value = *(u8*)(mem_address());
-            write(value, 8);
+            if (mem_cond()) {
+                u64 value = *(u8*)(mem_address());
+                write(value, 8);
+            }
             break;
         }
         case load16: { // mem, offset
-            u64 value = *(u16*)(mem_address());
-            write(value, 16);
+            if (mem_cond()) {
+                u64 value = *(u16*)(mem_address());
+                write(value, 16);
+            }
             break;
         }
         case load32: { // mem, offset
-            u64 value = *(u32*)(mem_address());
-            write(value, 32);
+            if (mem_cond()) {
+                u64 value = *(u32*)(mem_address());
+                write(value, 32);
+            }
             break;
         }
         case load64: { // mem, offset
-            u64 value = *(u64*)(mem_address());
-            write(value, 64);
+            if (mem_cond()) {
+                u64 value = *(u64*)(mem_address());
+                write(value, 64);
+            }
             break;
         }
         case store8: { // mem, offset, data
-            assert(ssatype[ir.arg_3] == 8);
-            *(u8*)(mem_address())  = ssalist[ir.arg_3];
-            write(ssalist[ir.arg_3], 8); // for debugging only
+            if (mem_cond()) {
+                assert(ssatype[ir.arg_3] == 8);
+                *(u8*)(mem_address())  = ssalist[ir.arg_3];
+                write(ssalist[ir.arg_3], 8); // for debugging only
+            }
             break;
         }
         case store16: { // mem, offset, data
-            assert(ssatype[ir.arg_3] == 16);
-            *(u16*)(mem_address()) = ssalist[ir.arg_3];
-            write(ssalist[ir.arg_3], 16); // for debugging only
+            if (mem_cond()) {
+                assert(ssatype[ir.arg_3] == 16);
+                *(u16*)(mem_address()) = ssalist[ir.arg_3];
+                write(ssalist[ir.arg_3], 16); // for debugging only
+            }
             break;
         }
         case store32: { // mem, offset, data
-            assert(ssatype[ir.arg_3] == 32);
-            *(u32*)(mem_address()) = ssalist[ir.arg_3];
-            write(ssalist[ir.arg_3], 32); // for debugging only
+            if (mem_cond()) {
+                assert(ssatype[ir.arg_3] == 32);
+                *(u32*)(mem_address()) = ssalist[ir.arg_3];
+                write(ssalist[ir.arg_3], 32); // for debugging only
+            }
             break;
         }
         case store64: { // mem, offset, data
-            //assert(ssatype[ir.arg_3] == 64);
-            *(u64*)(mem_address()) = ssalist[ir.arg_3];
-            write(ssalist[ir.arg_3], 64); // for debugging only
+            if (mem_cond()) {
+                //assert(ssatype[ir.arg_3] == 64);
+                *(u64*)(mem_address()) = ssalist[ir.arg_3];
+                write(ssalist[ir.arg_3], 64); // for debugging only
+            }
             break;
         }
 

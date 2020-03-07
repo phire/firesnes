@@ -26,7 +26,6 @@ enum Reg {
     Flag_E, // Emulation mode
     Flag_B, // Break
     CYCLE, // Not a register, but lets pretend.
-    ALIVE, // also not a register. But this has to be represented somehow
     NUM_REGS
 };
 

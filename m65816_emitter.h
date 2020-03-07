@@ -17,7 +17,9 @@ class Emitter {
     ssa bus_a;
     ssa regs;
 
-    size_t initializer_end_marker;
+    ssa memory_conditional;
+
+    size_t initializer_end_marker; // TODO: This is wrong. Doesn't handle moves/swaps.
 
     template<u8 bits>
     void finaliseReg(Reg r);
@@ -76,7 +78,7 @@ public:
 
     ssa memState(ssa bus) {
         // state[ALIVE] allows us to disable memory operations when this codepath is dead.
-        return push(IR_MemState(bus, state[CYCLE], state[ALIVE]));
+        return push(IR_MemState(bus, state[CYCLE], memory_conditional));
     }
 
     ssa Read(ssa addr) {
@@ -110,7 +112,9 @@ public:
         return push(IR_Eq(a, b));
     }
     void If(ssa cond, std::function<void()> then) {
-        std::map<Reg, ssa> old_state = state; // Copy state
+        std::map<Reg, ssa> old_state = state; // Push a copy of state
+        ssa old_mem_conditional = memory_conditional; // Push the memory conditional
+        memory_conditional = cond;
 
         then();
 
@@ -122,6 +126,9 @@ public:
                 new_val = Ternary(cond, new_val, old_state[key]);
             }
         }
+
+        // restore memory conditional
+        memory_conditional = old_mem_conditional;
     }
 };
 

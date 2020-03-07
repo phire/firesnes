@@ -11,7 +11,8 @@ namespace m65816 {
 
 Emitter::Emitter(u32 pc) {
     ssa null = Const<32>(0);
-    regs = push(IR_MemState(null, null, null));
+    ssa one  = Const<32>(1);
+    regs = push(IR_MemState(null, null, one));
     auto reg8 =  [&] (Reg r) { return push(IR_Load8( regs, Const<32>(r))); };
     auto reg16 = [&] (Reg r) { return push(IR_Load16(regs, Const<32>(r))); };
     auto reg64 = [&] (Reg r) { return push(IR_Load64(regs, Const<32>(r))); };
@@ -38,12 +39,12 @@ Emitter::Emitter(u32 pc) {
     state[Flag_E] = flag(Flag_E);
     state[Flag_B] = flag(Flag_B);
     state[CYCLE]  = reg64(CYCLE);
-    state[ALIVE]  = null; // Never actually read.
 
     //
     initializer_end_marker = buffer.size();
 
-    bus_a = Const<32>(1);
+    bus_a = one;
+    memory_conditional = one;
 }
 
 template<u8 bits> void Emitter::finaliseReg(Reg reg) {
