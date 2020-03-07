@@ -36,7 +36,7 @@ public:
     }
 
     ssa IncPC() {
-        return state[PC] = Extract(Add(state[PC], Const<16>(1)), 0, 16);
+        return state[PC] = Add(state[PC], Const<16>(1));
     }
     ssa IncCycle() {
         return state[CYCLE] = Add(state[CYCLE], 1);

@@ -76,18 +76,19 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
 
         switch(ir.id) {
         case Not: { // ~A
-            u64 mask = (1ULL << width) - 1;
+            u64 mask = 0xffffffffffffffff >> (64 - width);
             write((~ssalist[ir.arg_1]) & mask, width);
             break;
         }
         case Add: { // A + B
             //assert(width == ssatype[ir.arg_2]);
-            write(ssalist[ir.arg_1] + ssalist[ir.arg_2], width + 1);
+            u64 mask =  0xffffffffffffffff >> (64 - width);
+            write((ssalist[ir.arg_1] + ssalist[ir.arg_2]) & mask, width);
             break;
         }
         case Sub: { // A - B
             assert(width == ssatype[ir.arg_2]);
-            u64 mask = (1ULL << width) - 1;
+            u64 mask =  0xffffffffffffffff >> (64 - width);
             u64 value = ssalist[ir.arg_1] + ssalist[ir.arg_2];
             write(value & mask, width + 1);
             break;
@@ -128,7 +129,7 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             int shift = ssalist[ir.arg_2];
             int out_width = ssalist[ir.arg_3];
             assert(width >= out_width + shift);
-            u64 mask = (1ull << out_width) -1;
+            u64 mask = 0xffffffffffffffff >> (64 - width);
             u64 a = ssalist[ir.arg_1];
             write((a >> shift) & mask, out_width);
             break;
@@ -185,21 +186,25 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
         case store8: { // mem, offset, data
             assert(ssatype[ir.arg_3] == 8);
             *(u8*)(mem_address())  = ssalist[ir.arg_3];
+            write(ssalist[ir.arg_3], 8); // for debugging only
             break;
         }
         case store16: { // mem, offset, data
             assert(ssatype[ir.arg_3] == 16);
             *(u16*)(mem_address()) = ssalist[ir.arg_3];
+            write(ssalist[ir.arg_3], 16); // for debugging only
             break;
         }
         case store32: { // mem, offset, data
             assert(ssatype[ir.arg_3] == 32);
             *(u32*)(mem_address()) = ssalist[ir.arg_3];
+            write(ssalist[ir.arg_3], 32); // for debugging only
             break;
         }
         case store64: { // mem, offset, data
             //assert(ssatype[ir.arg_3] == 64);
             *(u64*)(mem_address()) = ssalist[ir.arg_3];
+            write(ssalist[ir.arg_3], 64); // for debugging only
             break;
         }
 

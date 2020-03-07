@@ -34,7 +34,7 @@ ssa AbsoluteLong(Emitter& e) {
 // handles adds extra cycles when required by page cross or the X flag.
 static ssa AddIndexReg(Emitter& e, Reg reg, ssa address) {
     ssa index = e.state[reg];
-    ssa new_address = e.Extract(e.Add(address, index), 0, 16);
+    ssa new_address = e.Add(address, index);
 
     // See if the upper bits change
     ssa mask = e.Const<16>(0xff00);
@@ -59,7 +59,7 @@ template ssa AbsoluteIndex<X>(Emitter& e);
 template ssa AbsoluteIndex<Y>(Emitter& e);
 
 ssa AbsoluteLongX(Emitter& e) {
-    return e.Extract(e.Add(AbsoluteLong(e), e.Cat(e.Const<8>(0), e.state[X])), 0, 24);
+    return e.Add(AbsoluteLong(e), e.Cat(e.Const<8>(0), e.state[X]));
 }
 
 ssa Direct(Emitter& e) {
@@ -72,7 +72,7 @@ ssa Direct(Emitter& e) {
         e.IncCycle();
     });
 
-    return e.Cat(e.Const<8>(0), e.Extract(e.Add(e.state[D], offset), 0, 16));
+    return e.Cat(e.Const<8>(0), e.Add(e.state[D], offset));
 }
 
 template<Reg indexreg>
@@ -81,7 +81,7 @@ ssa DirectIndex(Emitter& e) {
     ssa overflow = e.Neq(e.Const<16>(0x0000), e.And(e.state[D], e.Const<16>(0x00ff)));
     ssa wrap = e.And(e.Not(overflow), e.state[Flag_E]);
 
-    ssa wrapped = e.Or(e.And(e.state[D], e.Const<16>(0xff00)), e.And(e.Const<16>(0x00ff), e.Extract(e.Add(e.state[indexreg], offset), 0, 16)));
+    ssa wrapped = e.Or(e.And(e.state[D], e.Const<16>(0xff00)), e.And(e.Const<16>(0x00ff), e.Add(e.state[indexreg], offset)));
     ssa overflowed = e.Add(e.state[indexreg], offset);
     ssa address = e.Ternary(wrap, wrapped, overflowed);
 
@@ -118,7 +118,7 @@ ssa IndirectDirectLong(Emitter& e) {
     e.IncCycle();
 
     ssa address_low = e.Read(location);
-    ssa location_next = e.Extract(e.Add(location, 1), 0, 24);
+    ssa location_next = e.Add(location, 1);
     ssa location_next_next = e.Add(location, 2);
 
     e.IncCycle();
@@ -137,7 +137,7 @@ ssa StackRelative(Emitter& e) {
     // TODO: Dummy read to PBR,PC+1
     e.IncCycle(); // Internal cycle to do add
 
-    return e.Cat(e.Const<8>(0), e.Extract(e.Add(e.state[S], offset), 0, 16));
+    return e.Cat(e.Const<8>(0), e.Add(e.state[S], offset));
 }
 
 

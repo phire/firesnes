@@ -15,6 +15,7 @@ Emitter::Emitter(u32 pc) {
     auto reg8 =  [&] (Reg r) { return push(IR_Load8( regs, Const<32>(r))); };
     auto reg16 = [&] (Reg r) { return push(IR_Load16(regs, Const<32>(r))); };
     auto reg64 = [&] (Reg r) { return push(IR_Load64(regs, Const<32>(r))); };
+    auto flag =  [&] (Reg r) { return Extract(push(IR_Load64(regs, Const<32>(r))), 0, 1); };
 
     // Create SSA nodes for all state regs
     state[A]      = reg8(A);
@@ -26,16 +27,16 @@ Emitter::Emitter(u32 pc) {
     state[PC]     = Const<16>(pc & 0xffff); // PC is baked in to blocks
     state[DBR]    = reg8(DBR);
     state[PBR]    = Const<8>((pc >> 16) & 0xff);
-    state[Flag_N] = reg64(Flag_N);
-    state[Flag_V] = reg64(Flag_V);
-    state[Flag_M] = reg64(Flag_M);
-    state[Flag_X] = reg64(Flag_X);
-    state[Flag_D] = reg64(Flag_D);
-    state[Flag_I] = reg64(Flag_I);
-    state[Flag_Z] = reg64(Flag_Z);
-    state[Flag_C] = reg64(Flag_C);
-    state[Flag_E] = reg64(Flag_E);
-    state[Flag_B] = reg64(Flag_B);
+    state[Flag_N] = flag(Flag_N);
+    state[Flag_V] = flag(Flag_V);
+    state[Flag_M] = flag(Flag_M);
+    state[Flag_X] = flag(Flag_X);
+    state[Flag_D] = flag(Flag_D);
+    state[Flag_I] = flag(Flag_I);
+    state[Flag_Z] = flag(Flag_Z);
+    state[Flag_C] = flag(Flag_C);
+    state[Flag_E] = flag(Flag_E);
+    state[Flag_B] = flag(Flag_B);
     state[CYCLE]  = reg64(CYCLE);
     state[ALIVE]  = null; // Never actually read.
 
@@ -84,16 +85,15 @@ void Emitter::Finalize() {
 // Reads 8 or 16 bytes from PC depending on the Reg register
 static ssa ReadPc(Emitter& e, Reg reg) {
     ssa low = ReadPc(e);
-    e.IncCycle();
 
-    ssa high = e.Const<8>(0);
+    ssa wide = e.Not(e.state[reg]);
 
-    e.If(e.Not(e.state[reg]), [&] () {
+    ssa high;
+    e.If(wide, [&] () {
         high = ReadPc(e);
-        e.IncCycle();
     });
 
-    return e.Cat(high, low);
+    return e.Cat(e.Ternary(wide, high, e.Const<8>(0)), low);
 }
 
 // Reads 8 or 16 bytes from PC depending on the M register
@@ -140,15 +140,12 @@ static void ApplyImmediate(Emitter& e, inner_fn operation) {
     e.IncCycle();
 
     operation(e, e.state[A], immediate_address);
-    e.IncCycle();
-
-    immediate_address = e.Add(immediate_address, e.Const<24>(1));
-    e.IncPC();
-    e.IncCycle();
 
     e.If(e.Not(e.state[Flag_M]), [&] () {
-        operation(e, e.state[B], immediate_address);
+        immediate_address = e.Add(immediate_address, e.Const<24>(1));
+        e.IncPC();
         e.IncCycle();
+        operation(e, e.state[B], immediate_address);
     });
 }
 
@@ -197,9 +194,9 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
 }
 
 static void add_carry(Emitter e, ssa& dst, ssa val) {
-    ssa result = e.Add(e.Zext32(dst), e.Add(e.Zext32(val), e.state[Flag_C]));
+    ssa result = e.Add(e.Extract(dst, 0, 9), e.Add(e.Extract(val, 0, 9), e.state[Flag_C]));
     e.state[Flag_C] = e.ShiftLeft(result, 8);
-    dst = e.And(result, e.Const<8>(0xff));
+    dst = e.Extract(result, 0, 8);
 }
 
 std::array<std::function<void(Emitter&)>, 256> gen_table;
@@ -524,6 +521,8 @@ void emit(Emitter& e, u8 opcode) {
 }
 
 void interpeter_loop() {
+
+
     memory[0xc000] = 0xa2;
     memory[0xc001] = 0x00;
     memory[0xc002] = 0x86;
@@ -547,15 +546,19 @@ void interpeter_loop() {
     int offset = 0;
 
     u8 a = 0;
-    u8 x = 0;
-    u8 y = 0;
+    u16 x = 0;
+    u16 y = 0;
     u64 cycle = 0;
+
 
     int count = 4;
 
     while (count-- > 0) {
         u8 opcode = memory[pc];
-        printf("%X %X A:%02X X:%02X Y:%02X CYC: %i\n", pc, opcode, a, x, y, cycle);
+
+        u64 nes_cycle    = (9 + (cycle * 3)) % 340;
+        u64 nes_scanline = (340 * 241 + (cycle * 3)) / 340;
+        printf("%X %X A:%02X X:%02X Y:%02X CYC:% 2i SL:% 2i\n", pc, opcode, a, x, y, nes_cycle, nes_scanline);
 
         m65816::emit(e, opcode);
         partial_interpret(e.buffer, ssalist, ssatype, offset);
