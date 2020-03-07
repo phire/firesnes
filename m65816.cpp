@@ -9,7 +9,7 @@
 
 namespace m65816 {
 
-Emitter::Emitter() {
+Emitter::Emitter(u32 pc) {
     ssa null = Const<32>(0);
     regs = push(IR_MemState(null, null, null));
     auto reg8 =  [&] (Reg r) { return push(IR_Load8( regs, Const<32>(r))); };
@@ -23,9 +23,9 @@ Emitter::Emitter() {
     state[X]      = reg16(X);
     state[Y]      = reg16(Y);
     state[S]      = reg16(S);
-    state[PC]     = reg16(PC);
+    state[PC]     = Const<16>(pc & 0xffff); // PC is baked in to blocks
     state[DBR]    = reg8(DBR);
-    state[PBR]    = reg8(PBR);
+    state[PBR]    = Const<8>((pc >> 16) & 0xff);
     state[Flag_N] = reg64(Flag_N);
     state[Flag_V] = reg64(Flag_V);
     state[Flag_M] = reg64(Flag_M);
@@ -187,7 +187,7 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
 
     // Writeback High
     e.If(word, [&] () {
-        e.Write(high_address, e.Shift(result, -8));
+        e.Write(high_address, e.ShiftRight(result, 8));
         e.IncCycle();
     });
 
@@ -198,7 +198,7 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
 
 static void add_carry(Emitter e, ssa& dst, ssa val) {
     ssa result = e.Add(e.Zext32(dst), e.Add(e.Zext32(val), e.state[Flag_C]));
-    e.state[Flag_C] = e.Shift(result, 8);
+    e.state[Flag_C] = e.ShiftLeft(result, 8);
     dst = e.And(result, e.Const<8>(0xff));
 }
 
@@ -295,10 +295,10 @@ void populate_tables() {
 
     // TODO: Flags!
     // TODO: These won't work to well in 16bit mode
-    rwm("ASL", 0x00, [] (Emitter& e, ssa val) { return e.Shift(val, e.Const<32>(1));  });
-    rwm("LSR", 0x40, [] (Emitter& e, ssa val) { return e.Shift(val, e.Const<32>(-1)); });
-    rwm("ROL", 0x20, [] (Emitter& e, ssa val) { return e.Shift(val, e.Const<32>(1));  });
-    rwm("ROR", 0x60, [] (Emitter& e, ssa val) { return e.Shift(val, e.Const<32>(-1)); });
+    rwm("ASL", 0x00, [] (Emitter& e, ssa val) { return e.ShiftLeft(val, e.Const<32>(1));  });
+    rwm("LSR", 0x40, [] (Emitter& e, ssa val) { return e.ShiftRight(val, e.Const<32>(1)); });
+    rwm("ROL", 0x20, [] (Emitter& e, ssa val) { return e.ShiftLeft(val, e.Const<32>(1));  });
+    rwm("ROR", 0x60, [] (Emitter& e, ssa val) { return e.ShiftRight(val, e.Const<32>(1)); });
     rwm("INC", 0xe0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<8>(1));   });
     rwm("DEC", 0xc0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<8>(0xff));});
 
@@ -360,15 +360,26 @@ void populate_tables() {
         };
 
         auto idxmem = [&] (const char* name, size_t op_base, idxmem_type type, Reg reg) {
-            inner_fn fn;
-            switch (type) {
-                case STORE: fn = [&] (Emitter& e, ssa&, ssa addr) { e.Write(addr, e.state[reg]); }; break;
-                case LOAD:  fn = [&] (Emitter& e, ssa&, ssa addr) { e.state[reg] = e.Read(addr); }; break;
-                case CMP:   fn = [&] (Emitter& e, ssa&, ssa addr) { /* flags */ }; break;
-            }
-
             auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-                insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyMemoryOperation(e, fn, address_fn(e)); });
+                insert(op_base + sub_op, name, [type, reg, address_fn] (Emitter& e) {
+                    ssa addr = address_fn(e);
+                    switch(type) {
+                        case STORE: e.Write(addr, e.Extract(e.state[reg], 0, 8)); break;
+                        case LOAD:  e.state[reg] = e.Cat(e.Extract(e.state[reg], 8, 8), e.Read(addr)); break;
+                        case CMP:   /* flags */ break;
+                    }
+                    e.IncCycle();
+
+                    e.If(e.Not(e.state[Flag_X]), [&] () {
+                        ssa addr2 = e.Add(addr, 1);
+                        switch(type) {
+                            case STORE: e.Write(addr2, e.Extract(e.state[reg], 8, 8)); break;
+                            case LOAD:  e.state[reg] = e.Cat(e.Read(addr2), e.Extract(e.state[reg], 0, 8)); break;
+                            case CMP:   /* flags */ break;
+                        }
+                        e.IncCycle();
+                    });
+                });
             };
 
             apply(0x04, Direct);
@@ -472,7 +483,7 @@ void populate_tables() {
         // Always transfer as 16bits
         insert(opcode, name, [src] (Emitter& e) {
             e.state[A] = e.And(e.state[src], e.Const<32>(0xff));
-            e.state[B] = e.Shift(e.state[src], 8);
+            e.state[B] = e.ShiftLeft(e.state[src], 8);
             e.IncCycle();
          });
     };
@@ -512,6 +523,56 @@ void emit(Emitter& e, u8 opcode) {
 
 }
 
+void interpeter_loop() {
+    memory[0xc000] = 0xa2;
+    memory[0xc001] = 0x00;
+    memory[0xc002] = 0x86;
+    memory[0xc003] = 0x00;
+    memory[0xc004] = 0x86;
+    memory[0xc005] = 0x10;
+    memory[0xc006] = 0x87;
+    memory[0xc007] = 0x11;
+    memory[0xc008] = 0xea;
+    memory[0xc008] = 0xea;
+
+    // Initial register state
+    registers[m65816::Flag_M] = 1;
+    registers[m65816::Flag_X] = 1;
+
+    u32 pc = 0xc000;
+    m65816::Emitter e(pc);
+
+    std::vector<u64> ssalist;
+    std::vector<u8> ssatype;
+    int offset = 0;
+
+    u8 a = 0;
+    u8 x = 0;
+    u8 y = 0;
+    u64 cycle = 0;
+
+    int count = 4;
+
+    while (count-- > 0) {
+        u8 opcode = memory[pc];
+        printf("%X %X A:%02X X:%02X Y:%02X CYC: %i\n", pc, opcode, a, x, y, cycle);
+
+        m65816::emit(e, opcode);
+        partial_interpret(e.buffer, ssalist, ssatype, offset);
+        offset = e.buffer.size();
+
+        pc = ssalist[e.state[m65816::PC].offset];
+        a  = ssalist[e.state[m65816::A].offset];
+        x  = ssalist[e.state[m65816::X].offset];
+        y  = ssalist[e.state[m65816::Y].offset];
+        cycle = ssalist[e.state[m65816::CYCLE].offset];
+    }
+
+    e.Finalize();
+    partial_interpret(e.buffer, ssalist, ssatype, offset);
+
+}
+
 int main(int, char**) {
     printf("test\n");
 
@@ -525,7 +586,7 @@ int main(int, char**) {
         printf("  0x%x ", i);
     }
 
-    m65816::Emitter e;
+    m65816::Emitter e(0);
 
     for(int i = 0; i < 16; i++) {
         printf ("\n0x%x  ", i);
@@ -542,6 +603,9 @@ int main(int, char**) {
     }
 
     printf("\n\n\t\t%i/255\n", count);
+
+    interpeter_loop();
+    return 0;
 
     m65816::emit(e,  0xe9);
 

@@ -25,7 +25,7 @@ class Emitter {
 public:
     std::vector<IR_Base> buffer;
 
-    Emitter();
+    Emitter(u32 pc);
     void Finalize();
 
     std::map<Reg, ssa> state;
@@ -36,16 +36,22 @@ public:
     }
 
     ssa IncPC() {
-        return state[PC] = Add(state[PC], 1);
+        return state[PC] = Extract(Add(state[PC], Const<16>(1)), 0, 16);
     }
     ssa IncCycle() {
         return state[CYCLE] = Add(state[CYCLE], 1);
     }
-    ssa Shift(ssa a, ssa b) {
-        return push(IR_Shift(a, b));
+    ssa ShiftLeft(ssa a, ssa b) {
+        return push(IR_ShiftLeft(a, b));
     }
-    ssa Shift(ssa a, int b) {
-        return Shift(a, push(IR_Const32(b)));
+    ssa ShiftLeft(ssa a, int b) {
+        return ShiftLeft(a, push(IR_Const32(b)));
+    }
+    ssa ShiftRight(ssa a, ssa b) {
+        return push(IR_ShiftRight(a, b));
+    }
+    ssa ShiftRight(ssa a, int b) {
+        return ShiftRight(a, push(IR_Const32(b)));
     }
     ssa Not(ssa a) {
         return push(IR_Not(a));
@@ -61,6 +67,9 @@ public:
     }
     ssa Cat(ssa a, ssa b) {
         return push(IR_Cat(a, b));
+    }
+    ssa Extract(ssa a, int shift, int width) {
+        return push(IR_Extract(a, Const<32>(shift), Const<32>(width)));
     }
     ssa Zext16(ssa a) { return a; } // FIXME
     ssa Zext32(ssa a) { return a; } // FIXME
@@ -110,7 +119,7 @@ public:
             auto &old_val = old_state[key];
             if (old_val.offset != new_val.offset) {
                 // Insert a ternary operation where the state differs.
-                new_val = Ternary(cond, old_state[key], new_val);
+                new_val = Ternary(cond, new_val, old_state[key]);
             }
         }
     }

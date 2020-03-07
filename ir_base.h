@@ -13,9 +13,11 @@ enum Opcode {
     And, // A & B
     Or,  // A | B
     Xor, // A ^ B
-    Shift, // A << b OR A >> -b
+    ShiftLeft, // A << b
+    ShiftRight, // A >> -b
 
     Cat, // A << sizeof(B) | B
+    Extract, // (A >> B) & mask(C)
 
     Eq,  // A == B
     Neq, // A != B
@@ -32,10 +34,10 @@ enum Opcode {
 
 
 
-    ternary, // condition, true, false
+    Ternary, // condition, true, false
 
 
-    assert, // value, expected
+    Assert, // value, expected
 
     Const48 = 0x8000,
     Const,
@@ -49,8 +51,10 @@ inline const char* OpcodeName(u16 op) {
     case And: return "And";
     case Or: return "Or";
     case Xor: return "Xor";
-    case Shift: return "Shift";
+    case ShiftLeft: return "ShiftLeft";
+    case ShiftRight: return "ShiftRight";
     case Cat: return "Cat";
+    case Extract: return "Extract";
     case Eq: return "Eq";
     case Neq: return "Neq";
     case memState: return "memState";
@@ -62,8 +66,8 @@ inline const char* OpcodeName(u16 op) {
     case store32: return "store32";
     case store16: return "store16";
     case store8: return "store8";
-    case ternary: return "ternary";
-    case assert: return "assert";
+    case Ternary: return "ternary";
+    case Assert: return "assert";
     case Const48: return "Const48";
     case Const: return "Const";
     default: return "<error>";
@@ -161,8 +165,10 @@ using IR_And = IR2<Opcode::And>;
 using IR_Or  = IR2<Opcode::Or>;
 using IR_Xor = IR2<Opcode::Xor>;
 using IR_Cat = IR2<Opcode::Cat>;
-using IR_Ternary = IR3<Opcode::ternary>;
-using IR_Shift   = IR2<Opcode::Shift>;
+using IR_Extract = IR3<Opcode::Extract>;
+using IR_Ternary = IR3<Opcode::Ternary>;
+using IR_ShiftLeft = IR2<Opcode::ShiftLeft>;
+using IR_ShiftRight = IR2<Opcode::ShiftRight>;
 using IR_Const8  = IR_Const<8,  false>;
 using IR_Const16 = IR_Const<16, false>;
 using IR_Const24 = IR_Const<24, false>;
@@ -176,7 +182,7 @@ using IR_Store8 = IR3<Opcode::store8>;
 using IR_Store16 = IR3<Opcode::store16>;
 using IR_Store32 = IR3<Opcode::store32>;
 using IR_Store64 = IR3<Opcode::store64>;
-using IR_Assert = IR2<Opcode::assert>;
+using IR_Assert = IR2<Opcode::Assert>;
 using IR_Neq = IR2<Opcode::Neq>;
 using IR_Eq  = IR2<Opcode::Eq>;
 
@@ -191,3 +197,13 @@ static_assert(sizeof(IR_Const32) == sizeof(IR_Base));
 
     bool is() { return id == op; }
 };*/
+
+#include <vector>
+
+void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, std::vector<u8> &ssatype, int offset);
+void interpret(std::vector<IR_Base> ir);
+
+#include <array>
+
+extern std::array<u64, 32> registers;
+extern std::array<u8, 0xffff> memory;
