@@ -12,6 +12,8 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
     ssalist.resize(irlist.size());
     ssatype.resize(irlist.size());
 
+    bool print = false;
+
     for (int i=offset; i < irlist.size(); i++) {
 
 
@@ -66,17 +68,19 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             }
         };
 
-        if (ir.id < 0x8000) {
-            printf("% 5i: %s", i, OpcodeName(ir.id));
-            printarg(ir.arg_1);
-            printarg(ir.arg_2);
-            printarg(ir.arg_3);
-            //printf("\n");
-        } else if (ir.id == 0x8000) {
-            printf("const48 %x\n", ir.arg_48);
-        } else if (ir.id == Const) {
-            // Don't print consts, because printarg inlines them
-            printf("% 5i: const%i %x", i, ir.num_bits, ir.arg_32);
+        if (print) {
+            if (ir.id < 0x8000) {
+                printf("% 5i: %s", i, OpcodeName(ir.id));
+                printarg(ir.arg_1);
+                printarg(ir.arg_2);
+                printarg(ir.arg_3);
+                //printf("\n");
+            } else if (ir.id == 0x8000) {
+                printf("const48 %x\n", ir.arg_48);
+            } else if (ir.id == Const) {
+                // Don't print consts, because printarg inlines them
+                printf("% 5i: const%i %x", i, ir.num_bits, ir.arg_32);
+            }
         }
 
         switch(ir.id) {
@@ -140,12 +144,12 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             break;
         }
         case Eq: { // A == B
-            assert(width == ssatype[ir.arg_2]);
+            assert(width <= ssatype[ir.arg_2]);
             write(ssalist[ir.arg_1] == ssalist[ir.arg_2], 1);
             break;
         }
         case Neq: { // A != B
-            assert(width == ssatype[ir.arg_2]);
+            assert(width <= ssatype[ir.arg_2]);
             write(ssalist[ir.arg_1] != ssalist[ir.arg_2], 1);
             break;
         }
@@ -172,6 +176,8 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             if (mem_cond()) {
                 u64 value = *(u8*)(mem_address());
                 write(value, 8);
+            } else {
+                write(0, 8);
             }
             break;
         }
@@ -179,6 +185,8 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             if (mem_cond()) {
                 u64 value = *(u16*)(mem_address());
                 write(value, 16);
+            } else {
+                write(0, 16);
             }
             break;
         }
@@ -186,6 +194,8 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             if (mem_cond()) {
                 u64 value = *(u32*)(mem_address());
                 write(value, 32);
+            } else {
+                write(0, 32);
             }
             break;
         }
@@ -193,6 +203,8 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             if (mem_cond()) {
                 u64 value = *(u64*)(mem_address());
                 write(value, 64);
+            } else {
+                write(0, 64);
             }
             break;
         }
@@ -233,7 +245,8 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             assert(false); // Not implemented
         }
 
-        printf(" = %x:%i\n", ssalist[i], ssatype[i]);
+        if (print)
+            printf(" = %x:%i\n", ssalist[i], ssatype[i]);
     }
 }
 

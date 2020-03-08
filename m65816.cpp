@@ -195,6 +195,17 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
     e.IncCycle();
 }
 
+static void nz_flags(Emitter &e, ssa result) {
+    e.state[Flag_N] = e.Extract(result, 7, 1);
+    e.state[Flag_Z] = e.Eq(result, e.Const<8>(0)); // FIXME: Only works in 8bit mode
+}
+
+static void nvz_flags(Emitter &e, ssa result) {
+    e.state[Flag_N] = e.Extract(result, 7, 1);
+    e.state[Flag_V] = e.Extract(result, 6, 1);
+    e.state[Flag_Z] = e.Eq(result, e.Const<8>(0)); // FIXME: Only works in 8bit mode
+}
+
 static void add_carry(Emitter& e, ssa& dst, ssa val) {
     ssa result = e.Add(e.Extract(dst, 0, 9), e.Add(e.Extract(val, 0, 9), e.state[Flag_C]));
     e.state[Flag_C] = e.ShiftLeft(result, 8);
@@ -262,15 +273,15 @@ void populate_tables() {
 
     // TODO: All the flags
 
-    universal("ORA", 0x00, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Or(reg, e.Read(addr)); });
-    universal("AND", 0x20, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.And(reg, e.Read(addr)); });
-    universal("EOR", 0x40, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Xor(reg, e.Read(addr)); });
-    universal("ADC", 0x60, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Read(addr)); });
-    universal("STA", 0x80, [] (Emitter& e, ssa& reg, ssa addr) { e.Write(addr, reg); });
-    universal("LDA", 0xa0, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Read(addr); });
-    //universal("CMP", 0xc0, [] (Emitter& e, ssa& reg, ssa addr) { compare(state.p, a, readfn()); } },
+    universal("ORA", 0x00, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Or(reg, e.Read(addr)); nz_flags(e, reg); });
+    universal("AND", 0x20, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.And(reg, e.Read(addr)); nz_flags(e, reg); });
+    universal("EOR", 0x40, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Xor(reg, e.Read(addr)); nz_flags(e, reg); });
+    universal("ADC", 0x60, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Read(addr)); nvz_flags(e, reg); });
+    universal("STA", 0x80, [] (Emitter& e, ssa& reg, ssa addr) { e.Write(addr, reg); }); // Doesn't modify flags
+    universal("LDA", 0xa0, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Read(addr); nz_flags(e, reg); });
+    universal("CMP", 0xc0, [] (Emitter& e, ssa& reg, ssa addr) { ssa temp; add_carry(e, temp, e.Read(addr)); nz_flags(e, temp); });
     // TODO: Check correctness of SBC
-    universal("SBC", 0xe0, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Xor(e.Read(addr), e.Const<8>(255))); });
+    universal("SBC", 0xe0, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Xor(e.Read(addr), e.Const<8>(255))); nz_flags(e, reg); });
 
     // General Read-Modify-Write instructions:
     //      dir     abs     dir,x   abs,x   acc
@@ -372,19 +383,28 @@ void populate_tables() {
             auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
                 insert(op_base + sub_op, name, [type, reg, address_fn] (Emitter& e) {
                     ssa addr = address_fn(e);
-                    switch(type) {
-                        case STORE: e.Write(addr, e.Extract(e.state[reg], 0, 8)); break;
-                        case LOAD:  e.state[reg] = e.Cat(e.Extract(e.state[reg], 8, 8), e.Read(addr)); break;
-                        case CMP:   /* flags */ break;
+                    ssa val_low;
+                    if (type == STORE) {
+                         e.Write(addr, e.Extract(e.state[reg], 0, 8));
+                    } else {
+                            val_low = e.Read(addr);
+                            if (type == LOAD) {
+                                e.state[reg] = e.Cat(e.Const<8>(0), val_low);
+                            }
+                            nz_flags(e, val_low);
                     }
                     e.IncCycle();
 
                     e.If(e.Not(e.state[Flag_X]), [&] () {
                         ssa addr2 = e.Add(addr, 1);
-                        switch(type) {
-                            case STORE: e.Write(addr2, e.Extract(e.state[reg], 8, 8)); break;
-                            case LOAD:  e.state[reg] = e.Cat(e.Read(addr2), e.Extract(e.state[reg], 0, 8)); break;
-                            case CMP:   /* flags */ break;
+                        if (type == STORE) {
+                            e.Write(addr2, e.Extract(e.state[reg], 8, 8));
+                        } else {
+                            ssa val_high = e.Read(addr);
+                            if (type == LOAD) {
+                                e.state[reg] = e.Cat(val_high, val_low);
+                            }
+                            nz_flags(e, val_high);
                         }
                         e.IncCycle();
                     });
@@ -396,18 +416,37 @@ void populate_tables() {
 
             if (type != CMP)
                 apply(0x14, reg == X ? DirectIndex<Y> : DirectIndex<X>);
-            if (type == LOAD)
+            if (type == LOAD) {
                 apply(0x1c, reg == X ? AbsoluteIndex<Y> : AbsoluteIndex<X>);
-            if (type == LOAD)
-                insert(op_base + 0x00, name, [reg] (Emitter& e) { e.state[reg] = ReadPcX(e);  });
-            if (type == CMP)
-                insert(op_base + 0x00, name, [] (Emitter& e) { ReadPcX(e); /* flags */ });
+
+                insert(op_base + 0x00, name, [reg] (Emitter& e) {
+                    ssa low = ReadPc(e);
+                    nz_flags(e, low);
+
+                    ssa wide = e.Not(e.state[Flag_X]);
+
+                    ssa high;
+                    e.If(wide, [&] () {
+                        high = ReadPc(e);
+                        nz_flags(e, high);
+                    });
+
+                    e.state[reg] = e.Cat(e.Ternary(wide, high, e.Const<8>(0)), low);
+                });
+            }
+            if (type == CMP) {
+                insert(op_base + 0x00, name, [reg] (Emitter& e) {
+                    ssa result = e.state[reg];
+                    add_carry(e, result, ReadPcX(e));
+                    nz_flags(e, result);
+                });
+            }
         };
 
         idxmem("STY", 0x80, STORE, Y);
         idxmem("STX", 0x82, STORE, X);
-        idxmem("LTY", 0xa0, LOAD,  Y);
-        idxmem("LTX", 0xa2, LOAD,  X);
+        idxmem("LDY", 0xa0, LOAD,  Y);
+        idxmem("LDX", 0xa2, LOAD,  X);
         idxmem("CPY", 0xc0, CMP,   Y);
         idxmem("CPX", 0xe0, CMP,   X);
     }
@@ -652,7 +691,7 @@ void interpeter_loop() {
     u64 cycle = 0;
 
 
-    int count = 30;
+    int count = 60;
 
     while (count-- > 0) {
 
@@ -688,6 +727,9 @@ void interpeter_loop() {
             partial_interpret(e.buffer, ssalist, ssatype, offset);
             e = m65816::Emitter(pc);
             offset = 0;
+
+            ssalist.resize(0);
+            ssatype.resize(0);
         }
     }
 
