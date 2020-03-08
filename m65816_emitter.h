@@ -29,6 +29,11 @@ class Emitter {
 
 public:
     std::vector<IR_Base> buffer;
+    bool ending = false;
+
+    void MarkBlockEnd() {
+        ending = true;
+    }
 
     Emitter(u32 pc);
     void Finalize();

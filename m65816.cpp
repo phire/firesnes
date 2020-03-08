@@ -154,7 +154,7 @@ static void ApplyImmediate(Emitter& e, inner_fn operation) {
 
 using rmw_fn = std::function<ssa(Emitter&, ssa)>;
 
-static void ApplyAcc(Emitter e, rmw_fn operation) {
+static void ApplyAcc(Emitter& e, rmw_fn operation) {
     e.state[A] = operation(e, e.state[A]);
     e.IncCycle();
 
@@ -195,10 +195,20 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
     e.IncCycle();
 }
 
-static void add_carry(Emitter e, ssa& dst, ssa val) {
+static void add_carry(Emitter& e, ssa& dst, ssa val) {
     ssa result = e.Add(e.Extract(dst, 0, 9), e.Add(e.Extract(val, 0, 9), e.state[Flag_C]));
     e.state[Flag_C] = e.ShiftLeft(result, 8);
     dst = e.Extract(result, 0, 8);
+}
+
+static ssa modifyStack(Emitter& e, int dir) {
+    ssa native_stack = e.Add(e.state[S], e.Const<16>(u32(dir) & 0xffff));
+
+    // The emulated stack is forced into the 0x0100 to 0x01ff range on E bit toggle
+    // and kept in that range after any stack update during emulated mode
+    ssa emulated_stack = e.Cat(e.Const<8>(0x01), e.Extract(native_stack, 0, 8));
+    e.state[S] = e.Ternary(e.state[Flag_E], emulated_stack, native_stack);
+    return e.state[S];
 }
 
 std::array<std::function<void(Emitter&)>, 256> gen_table;
@@ -508,7 +518,53 @@ void populate_tables() {
 
     // Stack operations
 
+    // Unconditional Jump Instructions:
+    //       a    al   (a)   (a,x)
+    // JMP   4c   5c   6c    7c
+    // JML             dc
+    // JSR   20              fc
+    // JSL        22
 
+    // No real pattern to extract here.
+
+    auto jump = [&] (const char* name, size_t opcode, std::function<ssa(Emitter&)> address_fn, bool subroutine) {
+        insert(opcode, name, [address_fn, subroutine] (Emitter& e) {
+            ssa long_address = address_fn(e);
+            if (subroutine) {
+                // TODO: Dummy Read to PBR,PC+2
+                e.IncCycle(); // Internal operation
+
+                ssa low =  e.Extract(e.state[PC], 0, 8);
+                ssa high =  e.Extract(e.state[PC], 8, 8);
+                e.Write(e.Cat(e.Const<8>(0), e.state[S]), low);
+                e.IncCycle();
+
+                modifyStack(e, -1);
+                e.Write(e.Cat(e.Const<8>(0), e.state[S]), high);
+                e.IncCycle();
+
+                modifyStack(e, -1);
+            }
+            e.state[PC] = e.Extract(long_address, 0, 16);
+            e.state[PBR] = e.Extract(long_address, 16, 8);
+            e.MarkBlockEnd();
+        });
+    };
+
+    jump("JMP", 0x4c, Absolute, false);
+    jump("JMP", 0x5c, AbsoluteLong, false);
+    //jump("JMP", 0x6c, AbsoluteIndirect, false);
+    //jump("JMP", 0x7c, AbsoluteIndexedXIndirect, false);
+    //jump("JML", 0x5c, AbsoluteIndirectLong, false);
+    jump("JSR", 0x20, Absolute, true);
+    //jump("JSR", 0xfc, AbsoluteIndexedXIndirect, true);
+    //jump("JSL", 0x22, AbsoluteIndirectLong, true);
+
+    // Nop Instruction:
+    insert(0xea, "NOP", [] (Emitter& e) {
+        // TODO: Dummy read to PBR,PC+1
+        e.IncCycle();
+    });
 }
 
 
@@ -523,19 +579,6 @@ void emit(Emitter& e, u8 opcode) {
 }
 
 void interpeter_loop() {
-
-/*
-    memory[0xc000] = 0xa2;
-    memory[0xc001] = 0x00;
-    memory[0xc002] = 0x86;
-    memory[0xc003] = 0x00;
-    memory[0xc004] = 0x86;
-    memory[0xc005] = 0x10;
-    memory[0xc006] = 0x87;
-    memory[0xc007] = 0x11;
-    memory[0xc008] = 0xea;
-    memory[0xc008] = 0xea;
-    */
 
     // Initial register state
     registers[m65816::Flag_M] = 1;
@@ -555,12 +598,14 @@ void interpeter_loop() {
     u64 cycle = 0;
 
 
-    int count = 4;
+    int count = 9;
 
     while (count-- > 0) {
+
+
         u8 opcode = memory[pc];
 
-        u64 nes_cycle    = (9 + (cycle * 3)) % 340;
+        u64 nes_cycle    = (cycle * 3) % 340;
         u64 nes_scanline = (340 * 241 + (cycle * 3)) / 340;
         printf("%X %X A:%02X X:%02X Y:%02X CYC:% 2i SL:% 2i\n", pc, opcode, a, x, y, nes_cycle, nes_scanline);
 
@@ -573,6 +618,14 @@ void interpeter_loop() {
         x  = ssalist[e.state[m65816::X].offset];
         y  = ssalist[e.state[m65816::Y].offset];
         cycle = ssalist[e.state[m65816::CYCLE].offset];
+
+        if (e.ending) {
+            printf("End of block\n");
+            e.Finalize();
+            partial_interpret(e.buffer, ssalist, ssatype, offset);
+            e = m65816::Emitter(pc);
+            offset = 0;
+        }
     }
 
     e.Finalize();

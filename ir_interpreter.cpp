@@ -134,7 +134,7 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             int shift = ssalist[ir.arg_2];
             int out_width = ssalist[ir.arg_3];
             assert(width >= out_width + shift);
-            u64 mask = 0xffffffffffffffff >> (64 - width);
+            u64 mask = 0xffffffffffffffff >> (64 - out_width);
             u64 a = ssalist[ir.arg_1];
             write((a >> shift) & mask, out_width);
             break;
