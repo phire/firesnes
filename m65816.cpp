@@ -516,6 +516,24 @@ void populate_tables() {
     // XCE -- swap carry and emu
     swap("XCE", 0xfb, Flag_E, Flag_C);
 
+    // Flag Modification Instructions:
+
+    auto flag = [&] (const char* name, size_t opcode, Reg flag, int value) {
+        insert(opcode, name, [flag, value] (Emitter& e) {
+            e.state[flag] = e.Const<1>(value);
+            // TODO: Dummy read to PC+1
+            e.IncCycle();
+        });
+    };
+
+    flag("CLC", 0x18, Flag_C, 0);
+    flag("SEC", 0x38, Flag_C, 1);
+    flag("CLI", 0x58, Flag_I, 0);
+    flag("SEI", 0x78, Flag_I, 1);
+    flag("CLV", 0xb8, Flag_V, 0);
+    flag("CLD", 0xd8, Flag_D, 0);
+    flag("SED", 0xf8, Flag_D, 1);
+
     // Stack operations
 
     // Unconditional Jump Instructions:
@@ -560,6 +578,38 @@ void populate_tables() {
     //jump("JSR", 0xfc, AbsoluteIndexedXIndirect, true);
     //jump("JSL", 0x22, AbsoluteIndirectLong, true);
 
+    // Conditional Branch Instructions:
+
+    auto branch = [&] (const char* name, size_t opcode, std::function<ssa(Emitter&)> condition_fn) {
+        insert(opcode, name, [condition_fn] (Emitter& e) {
+            ssa cond = condition_fn(e);
+            ssa offset = ReadPc(e);
+            e.If(cond, [&] () {
+                ssa old_pc = e.state[PC];
+                e.state[PC] = e.Add(e.state[PC], e.Cat(e.Const<8>(0), offset));
+                e.IncCycle(); // Extra cycle when branch taken
+                e.If(e.state[Flag_E], [&] () {
+                    // In emulation mode, an extra cycle is taken when a branch crosses a page boundary
+                    e.If(e.Neq(e.Extract(old_pc, 8, 8), e.Extract(e.state[PC], 8, 8)), [&] () {
+                        e.state[CYCLE] = e.Add(e.state[CYCLE], e.Const<64>(1));
+                    });
+                });
+            });
+
+            e.MarkBlockEnd();
+        });
+    };
+
+    branch("BPL", 0x10, [] (Emitter& e) { return e.Not(e.state[Flag_N]); });
+    branch("BMI", 0x30, [] (Emitter& e) { return e.state[Flag_N]; });
+    branch("BCV", 0x50, [] (Emitter& e) { return e.Not(e.state[Flag_V]); });
+    branch("BSV", 0x70, [] (Emitter& e) { return e.state[Flag_V]; });
+    branch("BRA", 0x80, [] (Emitter& e) { return e.Const<1>(1); });
+    branch("BCC", 0x90, [] (Emitter& e) { return e.Not(e.state[Flag_C]); });
+    branch("BCS", 0xB0, [] (Emitter& e) { return e.state[Flag_C]; });
+    branch("BNE", 0xD0, [] (Emitter& e) { return e.Not(e.state[Flag_Z]); });
+    branch("BEQ", 0xF0, [] (Emitter& e) { return e.state[Flag_Z]; });
+
     // Nop Instruction:
     insert(0xea, "NOP", [] (Emitter& e) {
         // TODO: Dummy read to PBR,PC+1
@@ -584,6 +634,8 @@ void interpeter_loop() {
     registers[m65816::Flag_M] = 1;
     registers[m65816::Flag_X] = 1;
     registers[m65816::Flag_E] = 1;
+    registers[m65816::Flag_I] = 1;
+    registers[m65816::S] = 0x01fd;
 
     u32 pc = 0xc000;
     m65816::Emitter e(pc);
@@ -595,10 +647,12 @@ void interpeter_loop() {
     u8 a = 0;
     u16 x = 0;
     u16 y = 0;
+    u8  p = 0x24;
+    u8 sp = 0x00;
     u64 cycle = 0;
 
 
-    int count = 9;
+    int count = 30;
 
     while (count-- > 0) {
 
@@ -607,7 +661,7 @@ void interpeter_loop() {
 
         u64 nes_cycle    = (cycle * 3) % 340;
         u64 nes_scanline = (340 * 241 + (cycle * 3)) / 340;
-        printf("%X %X A:%02X X:%02X Y:%02X CYC:% 2i SL:% 2i\n", pc, opcode, a, x, y, nes_cycle, nes_scanline);
+        printf("%X %X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:% 2i SL:% 2i\n", pc, opcode, a, x, y, p, sp, nes_cycle, nes_scanline);
 
         m65816::emit(e, opcode);
         partial_interpret(e.buffer, ssalist, ssatype, offset);
@@ -617,7 +671,16 @@ void interpeter_loop() {
         a  = ssalist[e.state[m65816::A].offset];
         x  = ssalist[e.state[m65816::X].offset];
         y  = ssalist[e.state[m65816::Y].offset];
+        sp = ssalist[e.state[m65816::S].offset] & 0xFF;
         cycle = ssalist[e.state[m65816::CYCLE].offset];
+        p = ssalist[e.state[m65816::Flag_N].offset] << 7
+          | ssalist[e.state[m65816::Flag_V].offset] << 6
+          | 1 << 5
+          | 0 << 4
+          | ssalist[e.state[m65816::Flag_D].offset] << 3
+          | ssalist[e.state[m65816::Flag_I].offset] << 2
+          | ssalist[e.state[m65816::Flag_Z].offset] << 1
+          | ssalist[e.state[m65816::Flag_C].offset] << 0;
 
         if (e.ending) {
             printf("End of block\n");
