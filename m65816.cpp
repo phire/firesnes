@@ -195,15 +195,31 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
     e.IncCycle();
 }
 
+static void zero_flag(Emitter &e, ssa result) {
+    ssa zero = e.Eq(result, e.Const<8>(0));
+
+    // As a hack we stash the result of the previous zero flag calculation in emitter
+    // It gets reset before every instruction.
+    // If it's present, then this must be the upper 8 bits
+    if (e.zero_lower) {
+        // And we And the result of the upper and lower bits to get our 16bit zero flag
+        e.state[Flag_Z] = e.And(zero, *e.zero_lower);
+    } else {
+        // Otherwise, stash this result away.
+        e.zero_lower = zero;
+        e.state[Flag_Z] = zero;
+    }
+}
+
 static void nz_flags(Emitter &e, ssa result) {
     e.state[Flag_N] = e.Extract(result, 7, 1);
-    e.state[Flag_Z] = e.Eq(result, e.Const<8>(0)); // FIXME: Only works in 8bit mode
+    zero_flag(e, result);
 }
 
 static void nvz_flags(Emitter &e, ssa result) {
     e.state[Flag_N] = e.Extract(result, 7, 1);
     e.state[Flag_V] = e.Extract(result, 6, 1);
-    e.state[Flag_Z] = e.Eq(result, e.Const<8>(0)); // FIXME: Only works in 8bit mode
+    zero_flag(e, result);
 }
 
 static void add_carry(Emitter& e, ssa& dst, ssa val) {
@@ -270,8 +286,6 @@ void populate_tables() {
             insert(op_base + 0x09, name, [fn] (Emitter& e) { ApplyImmediate(e, fn); });
         }
     };
-
-    // TODO: All the flags
 
     universal("ORA", 0x00, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Or(reg, e.Read(addr)); nz_flags(e, reg); });
     universal("AND", 0x20, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.And(reg, e.Read(addr)); nz_flags(e, reg); });
@@ -661,6 +675,8 @@ void emit(Emitter& e, u8 opcode) {
     // The opcode always gets baked into the IR trace, so we need emit code to check it hasn't changed
     ssa runtime_opcode = ReadPc(e);
     e.Assert(runtime_opcode, e.Const<8>(opcode));
+
+    e.zero_lower.reset();
 
     gen_table[opcode](e);
 }

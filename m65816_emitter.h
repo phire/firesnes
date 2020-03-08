@@ -31,6 +31,8 @@ public:
     std::vector<IR_Base> buffer;
     bool ending = false;
 
+    std::optional<ssa> zero_lower; // Bit of a hack to make emitting 16bit zero flag checks easier
+
     void MarkBlockEnd() {
         ending = true;
     }
