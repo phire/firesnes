@@ -225,8 +225,17 @@ static void add_carry(Emitter& e, ssa& dst, ssa val) {
     dst = e.Extract(result, 0, 8);
 }
 
+static void add_carry_overflow(Emitter& e, ssa& dst, ssa val) {
+    ssa sign_a = e.Extract(dst, 7, 1);
+    ssa sign_b = e.Extract(val, 7, 1);
+    add_carry(e, dst, val);
+    ssa sign_out = e.Extract(dst, 7, 1);
+    // Overflow when both input sign bits are diffrent from the output sign bit
+    e.state[Flag_V] = e.And(e.Xor(sign_a, sign_out), e.Xor(sign_b, sign_out));
+}
+
 static void subtract_borrow(Emitter& e, ssa& dst, ssa val) {
-    add_carry(e, dst, e.Xor(e.Const<8>(0xff), val));
+    add_carry_overflow(e, dst, e.Xor(e.Const<8>(0xff), val));
 }
 
 static void compare(Emitter& e, ssa& dst, ssa val) {
@@ -299,7 +308,7 @@ void populate_tables() {
     universal("ORA", 0x00, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Or(reg, e.Read(addr)); nz_flags(e, reg); });
     universal("AND", 0x20, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.And(reg, e.Read(addr)); nz_flags(e, reg); });
     universal("EOR", 0x40, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Xor(reg, e.Read(addr)); nz_flags(e, reg); });
-    universal("ADC", 0x60, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Read(addr)); nvz_flags(e, reg); });
+    universal("ADC", 0x60, [] (Emitter& e, ssa& reg, ssa addr) { add_carry_overflow(e, reg, e.Read(addr)); nz_flags(e, reg); });
     universal("STA", 0x80, [] (Emitter& e, ssa& reg, ssa addr) { e.Write(addr, reg); }); // Doesn't modify flags
     universal("LDA", 0xa0, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Read(addr); nz_flags(e, reg); });
     universal("CMP", 0xc0, [] (Emitter& e, ssa& reg, ssa addr) { compare(e, reg, e.Read(addr)); });
@@ -474,9 +483,19 @@ void populate_tables() {
             }
             if (type == CMP) {
                 insert(op_base + 0x00, name, [reg] (Emitter& e) {
-                    ssa result = e.state[reg];
-                    add_carry(e, result, ReadPcX(e));
-                    nz_flags(e, result);
+                    ssa low = ReadPc(e);
+                    ssa dst_low = e.Extract(e.state[reg], 0, 8);
+                    compare(e, dst_low, low);
+
+                    ssa wide = e.Not(e.state[Flag_X]);
+
+                    ssa high;
+                    e.If(wide, [&] () {
+                        high = ReadPc(e);
+                        ssa dst_high = e.Extract(e.state[reg], 8, 8);
+                        compare(e, dst_high, low);
+                        nz_flags(e, high);
+                    });
                 });
             }
         };
@@ -868,7 +887,7 @@ void interpeter_loop() {
     u64 cycle = 0;
 
 
-    int count = 300;
+    int count = 1000;
 
     while (count-- > 0) {
 

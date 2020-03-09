@@ -12,7 +12,7 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
     ssalist.resize(irlist.size());
     ssatype.resize(irlist.size());
 
-    bool print = false;
+    bool print = true;
 
     for (int i=offset; i < irlist.size(); i++) {
 
