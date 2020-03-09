@@ -109,7 +109,7 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
         }
         case Or: { // A | B
             assert(width == ssatype[ir.arg_2]);
-            write(ssalist[ir.arg_1] & ssalist[ir.arg_2], width);
+            write(ssalist[ir.arg_1] | ssalist[ir.arg_2], width);
             break;
         }
         case Xor: {// A ^ B
@@ -119,12 +119,12 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
         }
         case ShiftLeft: { // A << b OR A >> -b
             int shift = ssalist[ir.arg_2];
-            write(ssalist[ir.arg_2] << shift, width + shift);
+            write(ssalist[ir.arg_1] << shift, width + shift);
             break;
         }
         case ShiftRight: { // A << b OR A >> -b
             int shift = ssalist[ir.arg_2];
-            write(ssalist[ir.arg_2] >> shift, width - shift);
+            write(ssalist[ir.arg_1] >> shift, width - shift);
             break;
         }
         case Cat: { // A << sizeof(B) | B
