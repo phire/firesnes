@@ -644,6 +644,28 @@ void populate_tables() {
     //jump("JSR", 0xfc, AbsoluteIndexedXIndirect, true);
     //jump("JSL", 0x22, AbsoluteIndirectLong, true);
 
+    insert(0x60, "RTS", [] (Emitter& e) {
+        // TODO: Dummy Read to PBR,PC+1
+        e.IncCycle(); // Internal operation
+
+        modifyStack(e, +1);
+
+        // TODO: Dummy Read to PBR,PC+1
+        e.IncCycle(); // Internal operation
+
+        ssa high = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        modifyStack(e, +1);
+        e.IncCycle();
+
+        ssa low  = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        e.IncCycle();
+
+        e.state[PC] = e.Cat(high, low);
+        e.MarkBlockEnd();
+        // TODO: Dummy Read to S
+        e.IncCycle(); // Internal operation
+    });
+
     // Conditional Branch Instructions:
 
     auto branch = [&] (const char* name, size_t opcode, std::function<ssa(Emitter&)> condition_fn) {
