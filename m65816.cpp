@@ -38,7 +38,6 @@ Emitter::Emitter(u32 pc) {
     state[Flag_Z] = flag(Flag_Z);
     state[Flag_C] = flag(Flag_C);
     state[Flag_E] = flag(Flag_E);
-    state[Flag_B] = flag(Flag_B);
     state[CYCLE]  = reg64(CYCLE);
 
     //
@@ -78,10 +77,7 @@ void Emitter::Finalize() {
     finaliseReg<64>(Flag_Z);
     finaliseReg<64>(Flag_C);
     finaliseReg<64>(Flag_E);
-    finaliseReg<64>(Flag_B);
     finaliseReg<64>(CYCLE);
-
-    // Todo: how to handle alive?
 }
 
 // Reads 8 or 16 bytes from PC depending on the Reg register

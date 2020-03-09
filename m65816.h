@@ -24,7 +24,6 @@ enum Reg {
     Flag_Z, // Zero
     Flag_C, // Carry
     Flag_E, // Emulation mode
-    Flag_B, // Break
     CYCLE, // Not a register, but lets pretend.
     NUM_REGS
 };
