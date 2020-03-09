@@ -173,7 +173,7 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
         high = e.Read(high_address);
         e.IncCycle();
     });
-    ssa value = e.Ternary(word, e.Cat(high, low), low);
+    ssa value = e.Cat(e.Ternary(word, high, e.Const<8>(0)), low);
 
     // Internal operation
     // TODO: Dummy read to same address as previous
@@ -191,6 +191,7 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
     e.IncCycle();
 }
 
+// Calculates zero flag of an 8bit result. Chains to 16bits
 static void zero_flag(Emitter &e, ssa result) {
     ssa zero = e.Eq(result, e.Const<8>(0));
 
@@ -324,13 +325,12 @@ void populate_tables() {
     };
 
     // TODO: Flags!
-    // TODO: These won't work to well in 16bit mode
     rwm("ASL", 0x00, [] (Emitter& e, ssa val) { return e.ShiftLeft(val, e.Const<32>(1));  });
     rwm("LSR", 0x40, [] (Emitter& e, ssa val) { return e.ShiftRight(val, e.Const<32>(1)); });
     rwm("ROL", 0x20, [] (Emitter& e, ssa val) { return e.ShiftLeft(val, e.Const<32>(1));  });
     rwm("ROR", 0x60, [] (Emitter& e, ssa val) { return e.ShiftRight(val, e.Const<32>(1)); });
-    rwm("INC", 0xe0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<8>(1));   });
-    rwm("DEC", 0xc0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<8>(0xff));});
+    rwm("INC", 0xe0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<16>(1)); });
+    rwm("DEC", 0xc0, [] (Emitter& e, ssa val) { return e.Sub(val,   e.Const<16>(1)); });
 
     // Bit instructions:
     //      dir   abs     dir,x   abs,x  !imm!
@@ -338,7 +338,7 @@ void populate_tables() {
     // TSB  04    0c
     // BIT  24    2c      34      3c     <89>
 
-    auto bit = [&] (const char* name, size_t op_base, rmw_fn fn) {
+    auto bit_rmw = [&] (const char* name, size_t op_base, rmw_fn fn) {
         auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
             insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
         };
@@ -354,22 +354,39 @@ void populate_tables() {
     };
 
     // TODO: Flags!
-    bit("TRB", 0x10, [] (Emitter& e, ssa val) { return e.And(val, e.Xor(e.Const<8>(255), e.state[A])); });
-    bit("TSB", 0x00, [] (Emitter& e, ssa val) { return e.Or(val, e.state[A]); });
-    bit("BIT", 0x20, [] (Emitter& e, ssa val) { /* do flags; */ return val; });
+    // FIXME: wrong
+    //bit_rmw("TRB", 0x10, [] (Emitter& e, ssa val) { return e.And(val, e.Xor(e.Const<8>(255), e.state[A])); });
+    //bit_rmw("TSB", 0x00, [] (Emitter& e, ssa val) { return e.Or(val, e.state[A]); });
 
-    // Bit #imm is diffrent. Doesn't fit with the above encoding and does flags differently.
-    insert(0x89, "BIT", [] (Emitter e) {
-        auto value = ReadPcM(e);
-        auto acc_high = e.Ternary(e.state[Flag_M], e.Const<8>(0), e.state[B]);
-        auto acc = e.Cat(acc_high, e.state[A]);
+    {
+        auto apply_bit = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
+            insert(0x20 | sub_op, "BIT", [address_fn] (Emitter& e) {
+                auto fn = [] (Emitter &e, ssa &dst, ssa address) {
+                    ssa val =  e.Read(address);
+                    e.state[Flag_N] = e.Extract(val, 7, 1);
+                    e.state[Flag_V] = e.Extract(val, 6, 1);
+                    ssa result = e.And(dst, val);
+                    zero_flag(e, result);
+                };
+                ApplyMemoryOperation(e, fn, address_fn(e));
+            });
+        };
 
-        auto result = e.And(value, acc);
+        apply_bit(0x04, Direct);
+        apply_bit(0x0c, Absolute);
+        apply_bit(0x14, DirectIndex<X>);
+        apply_bit(0x1c, AbsoluteIndex<X>);
+        insert(0x89, "BIT", [] (Emitter &e) {
+            ssa value = ReadPcM(e);
+            ssa acc_high = e.Ternary(e.state[Flag_M], e.Const<8>(0), e.state[B]);
+            ssa acc = e.Cat(acc_high, e.state[A]);
 
-        // Only sets Z
-        e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+            ssa result = e.And(value, acc);
 
-    });
+            // Only sets Z
+            e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+        });
+    }
 
     // Index<-->Memory instructions:
     //      dir     abs     dir.X/Y  abs.X/Y   imm
