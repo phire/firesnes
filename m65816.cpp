@@ -220,7 +220,7 @@ static void nvz_flags(Emitter &e, ssa result) {
 }
 
 static void add_carry(Emitter& e, ssa& dst, ssa val) {
-    ssa result = e.Add(e.Extract(dst, 0, 9), e.Add(e.Extract(val, 0, 9), e.state[Flag_C]));
+    ssa result = e.Add(e.Zext<9>(dst), e.Add(e.Zext<9>(val), e.Zext<9>(e.state[Flag_C])));
     e.state[Flag_C] = e.ShiftLeft(result, 8);
     dst = e.Extract(result, 0, 8);
 }

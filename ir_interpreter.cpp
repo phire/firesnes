@@ -143,6 +143,10 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
             write((a >> shift) & mask, out_width);
             break;
         }
+        case Zext: {
+            write(ssalist[ir.arg_1], ssalist[ir.arg_2]);
+            break;
+        }
         case Eq: { // A == B
             assert(width <= ssatype[ir.arg_2]);
             write(ssalist[ir.arg_1] == ssalist[ir.arg_2], 1);

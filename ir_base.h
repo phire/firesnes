@@ -18,6 +18,7 @@ enum Opcode {
 
     Cat, // A << sizeof(B) | B
     Extract, // (A >> B) & mask(C)
+    Zext, // zero expand A to B bits
 
     Eq,  // A == B
     Neq, // A != B
@@ -55,6 +56,7 @@ inline const char* OpcodeName(u16 op) {
     case ShiftRight: return "ShiftRight";
     case Cat: return "Cat";
     case Extract: return "Extract";
+    case Zext: return "Zext";
     case Eq: return "Eq";
     case Neq: return "Neq";
     case memState: return "memState";
@@ -166,6 +168,7 @@ using IR_Or  = IR2<Opcode::Or>;
 using IR_Xor = IR2<Opcode::Xor>;
 using IR_Cat = IR2<Opcode::Cat>;
 using IR_Extract = IR3<Opcode::Extract>;
+using IR_Zext    = IR2<Opcode::Zext>;
 using IR_Ternary = IR3<Opcode::Ternary>;
 using IR_ShiftLeft = IR2<Opcode::ShiftLeft>;
 using IR_ShiftRight = IR2<Opcode::ShiftRight>;

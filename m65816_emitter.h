@@ -91,8 +91,11 @@ public:
     ssa Extract(ssa a, int shift, int width) {
         return push(IR_Extract(a, Const<32>(shift), Const<32>(width)));
     }
-    ssa Zext16(ssa a) { return a; } // FIXME
-    ssa Zext32(ssa a) { return a; } // FIXME
+
+    template <u8 bits>
+    ssa Zext(ssa a) {
+         return push(IR_Zext(a, Const<32>(bits)));
+    }
 
     ssa memState(ssa bus) {
         // state[ALIVE] allows us to disable memory operations when this codepath is dead.
