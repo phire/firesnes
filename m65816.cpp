@@ -716,26 +716,29 @@ void interpeter_loop() {
     u16 x = 0;
     u16 y = 0;
     u8  p = 0x24;
-    u8 sp = 0x00;
+    u8 sp = 0xfd;
     u64 cycle = 0;
 
 
-    int count = 60;
+    int count = 300;
 
     while (count-- > 0) {
 
 
         u8 opcode = memory[pc];
 
-        u64 nes_cycle    = (cycle * 3) % 340;
-        u64 nes_scanline = (340 * 241 + (cycle * 3)) / 340;
-        printf("%X %X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:% 2i SL:% 2i\n", pc, opcode, a, x, y, p, sp, nes_cycle, nes_scanline);
+        u64 nes_cycle    = (cycle * 3) % 341;
+        u64 nes_scanline = (341 * 241 + (cycle * 3)) / 341;
+        printf("%X  %X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%3i SL:%3i\n", pc, opcode, a, x, y, p, sp, nes_cycle, nes_scanline);
 
         m65816::emit(e, opcode);
         partial_interpret(e.buffer, ssalist, ssatype, offset);
         offset = e.buffer.size();
 
+        // Extract PC so we know the next instruction
         pc = ssalist[e.state[m65816::PC].offset];
+
+        // Extact other registers for debugging:
         a  = ssalist[e.state[m65816::A].offset];
         x  = ssalist[e.state[m65816::X].offset];
         y  = ssalist[e.state[m65816::Y].offset];
