@@ -221,8 +221,20 @@ static void nvz_flags(Emitter &e, ssa result) {
 
 static void add_carry(Emitter& e, ssa& dst, ssa val) {
     ssa result = e.Add(e.Zext<9>(dst), e.Add(e.Zext<9>(val), e.Zext<9>(e.state[Flag_C])));
-    e.state[Flag_C] = e.ShiftLeft(result, 8);
+    e.state[Flag_C] = e.Extract(result, 8, 1);
     dst = e.Extract(result, 0, 8);
+}
+
+static void subtract_borrow(Emitter& e, ssa& dst, ssa val) {
+    add_carry(e, dst, e.Xor(e.Const<8>(0xff), val));
+}
+
+static void compare(Emitter& e, ssa& dst, ssa val) {
+    // Like subtract, but forces carry to 1 and doesn't set result
+    ssa inverted = e.Xor(e.Const<8>(0xff), val);
+    ssa result = e.Add(e.Zext<9>(dst), e.Add(e.Zext<9>(inverted), e.Const<9>(1)));
+    e.state[Flag_C] = e.Extract(result, 8, 1);
+    nz_flags(e, e.Extract(result, 0, 8));
 }
 
 static ssa modifyStack(Emitter& e, int dir) {
@@ -290,9 +302,8 @@ void populate_tables() {
     universal("ADC", 0x60, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Read(addr)); nvz_flags(e, reg); });
     universal("STA", 0x80, [] (Emitter& e, ssa& reg, ssa addr) { e.Write(addr, reg); }); // Doesn't modify flags
     universal("LDA", 0xa0, [] (Emitter& e, ssa& reg, ssa addr) { reg = e.Read(addr); nz_flags(e, reg); });
-    universal("CMP", 0xc0, [] (Emitter& e, ssa& reg, ssa addr) { ssa temp; add_carry(e, temp, e.Read(addr)); nz_flags(e, temp); });
-    // TODO: Check correctness of SBC
-    universal("SBC", 0xe0, [] (Emitter& e, ssa& reg, ssa addr) { add_carry(e, reg, e.Xor(e.Read(addr), e.Const<8>(255))); nz_flags(e, reg); });
+    universal("CMP", 0xc0, [] (Emitter& e, ssa& reg, ssa addr) { compare(e, reg, e.Read(addr)); });
+    universal("SBC", 0xe0, [] (Emitter& e, ssa& reg, ssa addr) { subtract_borrow(e, reg, e.Read(addr)); nz_flags(e, reg); });
 
     // General Read-Modify-Write instructions:
     //      dir     abs     dir,x   abs,x   acc
