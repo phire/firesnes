@@ -132,6 +132,11 @@ public:
     ssa Eq(ssa a, ssa b) {
         return push(IR_Eq(a, b));
     }
+
+    // Magic for conditional modification of state. Takes a lambda
+    // Can be nested.
+    // Unfortunately, only state changes and memory operations are conditional.
+    // Any SSA varables that excape the lambda by reference won't be conditional.
     void If(ssa cond, std::function<void()> then) {
         std::map<Reg, ssa> old_state = state; // Push a copy of state
         ssa old_mem_conditional = memory_conditional; // Push the memory conditional

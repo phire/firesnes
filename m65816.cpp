@@ -531,9 +531,20 @@ void populate_tables() {
     // INX  e8
 
     auto inc = [&] (const char* name, size_t opcode, Reg index, int dir) {
-        insert(opcode, name, [&] (Emitter& e) {
-            ssa mask = e.Const<32>(0xffff); // Always 16bit
-            e.state[X] = e.And(e.Add(e.state[X], e.Const<32>(dir)), mask);
+        insert(opcode, name, [index, dir] (Emitter& e) {
+            ssa result = e.Add(e.state[index], e.Const<16>(u16(dir)));
+            ssa lower = e.Extract(result, 0, 8);
+            ssa upper = e.Extract(result, 8, 8);
+
+            // Discard modifications to upper half when 16 bit index registers are disabled
+            e.state[index] = e.Cat(e.Extract(e.state[index], 8, 8), lower);
+            nz_flags(e, lower);
+
+            e.If(e.Not(e.state[Flag_X]), [&] () {
+                // otherwise use full 16 bits.
+                e.state[index] = result;
+                nz_flags(e, upper);
+            });
 
             // TODO: Dummy read to PC + 1
             e.IncCycle(); // Internal operation;
