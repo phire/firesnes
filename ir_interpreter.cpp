@@ -98,7 +98,7 @@ void partial_interpret(std::vector<IR_Base> irlist, std::vector<u64> &ssalist, s
         case Sub: { // A - B
             assert(width == ssatype[ir.arg_2]);
             u64 mask =  0xffffffffffffffff >> (64 - width);
-            u64 value = ssalist[ir.arg_1] + ssalist[ir.arg_2];
+            u64 value = ssalist[ir.arg_1] - ssalist[ir.arg_2];
             write(value & mask, width + 1);
             break;
         }

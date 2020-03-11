@@ -849,13 +849,15 @@ void populate_tables() {
                 // TODO: Dummy Read to PBR,PC+2
                 e.IncCycle(); // Internal operation
 
-                ssa low =  e.Extract(e.state[PC], 0, 8);
-                ssa high =  e.Extract(e.state[PC], 8, 8);
-                e.Write(e.Cat(e.Const<8>(0), e.state[S]), low);
+                // Return address is the last byte of the instruction
+                ssa return_address = e.Sub(e.state[PC], e.Const<16>(1));
+                ssa low =  e.Extract(return_address, 0, 8);
+                ssa high =  e.Extract(return_address, 8, 8);
+                e.Write(e.Cat(e.Const<8>(0), e.state[S]), high);
                 e.IncCycle();
 
                 modifyStack(e, -1);
-                e.Write(e.Cat(e.Const<8>(0), e.state[S]), high);
+                e.Write(e.Cat(e.Const<8>(0), e.state[S]), low);
                 e.IncCycle();
 
                 modifyStack(e, -1);
@@ -884,15 +886,20 @@ void populate_tables() {
         // TODO: Dummy Read to PBR,PC+1
         e.IncCycle(); // Internal operation
 
-        ssa high = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        ssa low = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
         modifyStack(e, +1);
         e.IncCycle();
 
-        ssa low  = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        ssa high  = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
         e.IncCycle();
 
-        e.state[PC] = e.Cat(high, low);
+        ssa return_address = e.Cat(high, low);
+
+        // The return address on stack is the last byte of the JSR instruction
+        // So increment by one
+        e.state[PC] = e.Add(return_address, 1);
         e.MarkBlockEnd();
+
         // TODO: Dummy Read to S
         e.IncCycle(); // Internal operation
     });
