@@ -208,6 +208,12 @@ static void zero_flag(Emitter &e, ssa result) {
     }
 }
 
+static void nz_flags16(Emitter &e, ssa result) {
+    e.state[Flag_N] = e.Extract(result, 15, 1);
+    e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+
+}
+
 static void nz_flags(Emitter &e, ssa result) {
     e.state[Flag_N] = e.Extract(result, 7, 1);
     zero_flag(e, result);
@@ -254,6 +260,88 @@ static ssa modifyStack(Emitter& e, int dir) {
     ssa emulated_stack = e.Cat(e.Const<8>(0x01), e.Extract(native_stack, 0, 8));
     e.state[S] = e.Ternary(e.state[Flag_E], emulated_stack, native_stack);
     return e.state[S];
+}
+
+static ssa loadReg16(Emitter &e, Reg reg, bool force16 = false) {
+    switch (reg) {
+    case A:
+        // It appears the full 16bits of A and B are always placed on the internal bus independent of M.
+        // Most of the time it doesn't matter, as the memory subsystem will only write 8 bits.
+        // but B will end up in the upper bits of a destination register during some transfer operations
+        return e.Cat(e.state[B], e.state[A]);
+    case X:
+    case Y:
+        if (force16)
+            return e.state[reg];
+        // The upper bits are forced to zero when Flag_X are set to
+        return e.Ternary(e.state[Flag_X], e.Cat(e.Const<8>(0), e.Extract(e.state[reg], 0, 8)), e.state[reg]);
+    default:
+        // All remaining regs are always 16bit
+        return e.state[reg];
+    }
+}
+
+static void storeReg16(Emitter &e, Reg reg, ssa value, bool force16 = false) {
+    switch (reg) {
+    case A: {
+        ssa low = e.Extract(value, 0, 8);
+        ssa high = e.Extract(value, 8, 8);
+
+        // A is always modified
+        e.state[A] = low;
+
+        if (force16) { // When an operation is forced to 16bits, B is always modified
+            e.state[B] = high;
+            nz_flags16(e, value); // All writes to A/B modify flags
+            return;
+        }
+        nz_flags(e, low); // All writes to A/B modify flags
+        // otherwise B is only modified when M is 0;
+        e.If(e.Not(e.state[Flag_M]), [&] () {
+            e.state[B] = high;
+            nz_flags(e, high);
+        });
+        return;
+    }
+    case X:
+    case Y: {
+        // Do the 16bit write first
+        //e.state[reg] = value;
+        //nz_flags16(e, value); // All writes to A/B modify flags
+        if (force16)
+            return;
+
+        // Fall back to an 8bit write when Flag_X is 1
+        e.If(e.state[Flag_X], [&] () {
+            ssa low = e.Extract(value, 0, 8);
+            ssa old_upper = e.Extract(e.state[reg], 8, 8);
+            e.state[reg] = e.Cat(old_upper, low);
+            nz_flags(e, low);
+        });
+        return;
+    }
+    case PBR:
+    case DBR: {
+        // These registers are always 8bit
+        ssa low = e.Extract(value, 0, 8);
+        e.state[reg] = low;
+        nz_flags(e, low);
+        return;
+    }
+    case S: {
+        // Updates to S don't update flags
+        // In emulation mode, the upper bits are forced to 0x0100
+        ssa low = e.Extract(value, 0, 8);
+        e.state[reg] = e.Ternary(e.state[Flag_E], e.Cat(e.Const<8>(0x01), low), value);
+        return;
+    }
+    case D:
+        e.state[reg] = value; // D is always 16 bit
+        nz_flags16(e, value);
+        return;
+    default:
+        assert(false);
+    }
 }
 
 std::array<std::function<void(Emitter&)>, 256> gen_table;
@@ -533,18 +621,7 @@ void populate_tables() {
     auto inc = [&] (const char* name, size_t opcode, Reg index, int dir) {
         insert(opcode, name, [index, dir] (Emitter& e) {
             ssa result = e.Add(e.state[index], e.Const<16>(u16(dir)));
-            ssa lower = e.Extract(result, 0, 8);
-            ssa upper = e.Extract(result, 8, 8);
-
-            // Discard modifications to upper half when 16 bit index registers are disabled
-            e.state[index] = e.Cat(e.Extract(e.state[index], 8, 8), lower);
-            nz_flags(e, lower);
-
-            e.If(e.Not(e.state[Flag_X]), [&] () {
-                // otherwise use full 16 bits.
-                e.state[index] = result;
-                nz_flags(e, upper);
-            });
+            storeReg16(e, index, result);
 
             // TODO: Dummy read to PC + 1
             e.IncCycle(); // Internal operation;
@@ -557,7 +634,7 @@ void populate_tables() {
     inc("INX", 0xe8, X,  1);
 
     // Transfer operations:
-    // TXA  8a
+    // TXA  8a  x -> a.
     // TYA  98
     // TXS  9a -- special. Doesn't effect flags
     // TXY  9b
@@ -571,43 +648,30 @@ void populate_tables() {
     // TDC  7b
     // TSC  3B
 
-    auto move = [&] (const char* name, size_t opcode, Reg src, Reg dst, bool flags = true) {
-        // TODO: Flags!
+    auto move = [&] (const char* name, size_t opcode, Reg src, Reg dst) {
         insert(opcode, name, [src, dst] (Emitter& e) {
-            ssa val = e.state[src];
-            ssa truncate = e.state[Flag_M]; // Truncate to 8 bits when M is set
-            e.state[dst] = e.Ternary(truncate, e.And(val, e.Const<32>(0xff)), val);
+            // loadReg16 and storeReg16 handle all compexities
+            // Correctly handling the M and X flags and updating flags on store (except when storing to S)
+            ssa value = loadReg16(e, src);
+            storeReg16(e, dst, value);
+
+            // TODO: Dummy read to PC + 1
             e.IncCycle();
         });
     };
 
-
     move("TXA", 0x8a, X, A);
     move("TYA", 0x98, Y, A);
-    move("TXS", 0x9a, X, S, false); // Only one which doesn't touch flags
+    move("TXS", 0x9a, X, S); // doesn't touch flags
     move("TXY", 0x9b, X, Y);
     move("TAX", 0xa8, A, Y);
     move("TAX", 0xaa, A, X);
     move("TSX", 0xba, S, X);
     move("TYX", 0xbb, Y, X);
-
-    auto movefromC = [&] (const char* name, size_t opcode, Reg dst) {
-        // Always transfer as 16bits
-        insert(opcode, name, [dst] (Emitter& e) { e.state[dst] = e.Cat(e.state[B], e.state[A]); e.IncCycle(); });
-    };
-    auto movetoC = [&] (const char* name, size_t opcode, Reg src) {
-        // Always transfer as 16bits
-        insert(opcode, name, [src] (Emitter& e) {
-            e.state[A] = e.And(e.state[src], e.Const<32>(0xff));
-            e.state[B] = e.ShiftLeft(e.state[src], 8);
-            e.IncCycle();
-         });
-    };
-
-    movefromC("TCD", 0x5b, D);
-    movefromC("TCS", 0x1b, S);
-    movetoC(  "TDC", 0x7b, D);
-    movetoC(  "TSC", 0x3b, S);
+    move("TCD", 0x5b, A, D);
+    move("TCS", 0x1b, A, S); // doesn't touch flags
+    move("TDC", 0x7b, D, A);
+    move("TSC", 0x3b, S, A);
 
     auto swap = [&] (const char* name, size_t opcode, Reg a, Reg b) {
         insert(opcode, name, [a, b] (Emitter& e) {
@@ -619,9 +683,20 @@ void populate_tables() {
     };
 
     // XBA -- swap B and A
-    swap("XBA", 0xeb, B, A); // TODO: flags????!!!
-    // XCE -- swap carry and emu
-    swap("XCE", 0xfb, Flag_E, Flag_C);
+    insert(0xeb, "XBA", [] (Emitter& e) {
+        ssa old_b = e.state[B];
+        e.state[B] = e.state[A];
+        e.state[A] = old_b;
+        nz_flags(e, e.state[A]); // Flags get updated according to the new 8 bit A value
+        e.IncCycle();
+    });
+    // XCE -- swap carry and emu flags
+    insert(0xfb, "XCE", [] (Emitter& e) {
+            ssa tmp = e.state[Flag_E];
+            e.state[Flag_E] = e.state[Flag_C];
+            e.state[Flag_C] = tmp;
+            e.IncCycle();
+    });
 
     // Flag Modification Instructions:
 
