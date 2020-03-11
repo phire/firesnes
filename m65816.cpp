@@ -432,11 +432,32 @@ void populate_tables() {
         }
     };
 
-    // TODO: Flags!
-    rwm("ASL", 0x00, [] (Emitter& e, ssa val) { return e.ShiftLeft(val, e.Const<32>(1));  });
-    rwm("LSR", 0x40, [] (Emitter& e, ssa val) { return e.ShiftRight(val, e.Const<32>(1)); });
-    rwm("ROL", 0x20, [] (Emitter& e, ssa val) { return e.ShiftLeft(val, e.Const<32>(1));  });
-    rwm("ROR", 0x60, [] (Emitter& e, ssa val) { return e.ShiftRight(val, e.Const<32>(1)); });
+    rwm("ASL", 0x00, [] (Emitter& e, ssa val) {
+        e.state[Flag_C] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(7), e.Const<32>(15)), 1);
+        e.state[Flag_N] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(6), e.Const<32>(14)), 1);
+        e.state[Flag_Z] = e.Eq(e.Extract(val, 0, 15), e.Const<15>(0));
+        return e.Cat(e.Extract(val, 0, 15), e.Const<1>(0));
+    });
+    rwm("LSR", 0x40, [] (Emitter& e, ssa val) {
+        e.state[Flag_C] = e.Extract(val, 0, 1);
+        e.state[Flag_N] = e.Const<1>(0); // Top bit is always zero
+        e.state[Flag_Z] = e.Eq(e.Extract(val, 1, 15), e.Const<15>(0));
+        return e.Cat(e.Extract(val, 0, 15), e.Const<1>(0));
+    });
+    rwm("ROL", 0x20, [] (Emitter& e, ssa val) {
+        ssa result = e.Cat(e.Extract(val, 0, 15), e.state[Flag_C]);
+        e.state[Flag_C] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(7), e.Const<32>(15)), 1);
+        e.state[Flag_N] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(6), e.Const<32>(14)), 1);
+        e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+        return result;
+    });
+    rwm("ROR", 0x60, [] (Emitter& e, ssa val) {
+        ssa result = e.Cat(e.state[Flag_C], e.Extract(val, 1, 15));
+        e.state[Flag_N] = e.state[Flag_C];
+        e.state[Flag_C] = e.Extract(val, 0, 1);
+        e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+        return result;
+    });
     rwm("INC", 0xe0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<16>(1)); });
     rwm("DEC", 0xc0, [] (Emitter& e, ssa val) { return e.Sub(val,   e.Const<16>(1)); });
 
@@ -923,6 +944,8 @@ void populate_tables() {
         e.state[Flag_I] = e.Extract(val, 2, 1);
         e.state[Flag_Z] = e.Extract(val, 1, 1);
         e.state[Flag_C] = e.Extract(val, 0, 1);
+        modifyStack(e, +1);
+        e.IncCycle();
 
         ssa low = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
         modifyStack(e, +1);
@@ -1022,7 +1045,7 @@ void interpeter_loop() {
     u64 cycle = 0;
 
 
-    int count = 1000;
+    int count = 1500;
 
     while (count-- > 0) {
 

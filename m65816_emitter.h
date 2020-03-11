@@ -88,6 +88,9 @@ public:
     ssa Cat(ssa a, ssa b) {
         return push(IR_Cat(a, b));
     }
+    ssa Extract(ssa a, ssa shift, int width) {
+        return push(IR_Extract(a, shift, Const<32>(width)));
+    }
     ssa Extract(ssa a, int shift, int width) {
         return push(IR_Extract(a, Const<32>(shift), Const<32>(width)));
     }
