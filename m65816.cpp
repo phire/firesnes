@@ -897,11 +897,53 @@ void populate_tables() {
 
         // The return address on stack is the last byte of the JSR instruction
         // So increment by one
-        e.state[PC] = e.Add(return_address, 1);
+        e.state[PC] = e.Add(return_address, e.Const<16>(1));
         e.MarkBlockEnd();
 
         // TODO: Dummy Read to S
         e.IncCycle(); // Internal operation
+    });
+
+    insert(0x40, "RTI", [] (Emitter& e) {
+        // TODO: Dummy Read to PBR,PC+1
+        e.IncCycle(); // Internal operation
+
+        modifyStack(e, +1);
+
+        // TODO: Dummy Read to PBR,PC+1
+        e.IncCycle(); // Internal operation
+
+        // Read status register
+        ssa val = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        e.state[Flag_N] = e.Extract(val, 7, 1);
+        e.state[Flag_V] = e.Extract(val, 6, 1);
+        e.state[Flag_M] = e.Ternary(e.state[Flag_E], e.state[Flag_M], e.Extract(val, 5, 1));
+        e.state[Flag_X] = e.Ternary(e.state[Flag_E], e.state[Flag_X], e.Extract(val, 4, 1));
+        e.state[Flag_D] = e.Extract(val, 3, 1);
+        e.state[Flag_I] = e.Extract(val, 2, 1);
+        e.state[Flag_Z] = e.Extract(val, 1, 1);
+        e.state[Flag_C] = e.Extract(val, 0, 1);
+
+        ssa low = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        modifyStack(e, +1);
+        e.IncCycle();
+
+        ssa high  = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+        e.IncCycle();
+
+        ssa return_address = e.Cat(high, low);
+
+        // Unlike RTS, return address doesn't need to be incremented
+        e.state[PC] = return_address;
+        e.MarkBlockEnd();
+
+        // Finally, if we are in native mode, pull the Program Bank register
+        e.If(e.Not(e.state[Flag_E]), [&] () {
+            modifyStack(e, +1);
+            e.IncCycle();
+            ssa pbr  = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
+            e.state[PBR] = pbr;
+        });
     });
 
     // Conditional Branch Instructions:
