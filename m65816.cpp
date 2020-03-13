@@ -925,7 +925,7 @@ void populate_tables() {
 
     jump("JMP", 0x4c, Absolute, false);
     jump("JMP", 0x5c, AbsoluteLong, false);
-    //jump("JMP", 0x6c, AbsoluteIndirect, false);
+    jump("JMP", 0x6c, IndirectAbsolute, false);
     //jump("JMP", 0x7c, AbsoluteIndexedXIndirect, false);
     //jump("JML", 0x5c, AbsoluteIndirectLong, false);
     jump("JSR", 0x20, Absolute, true);

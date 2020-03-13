@@ -183,23 +183,21 @@ ssa IndexYIndirectDirect(Emitter& e) {
 ssa IndexYIndirectDirectStore(Emitter& e) {
     return IndexYIndirectDirectInner(e, true);
 }
+
+ssa IndirectAbsolute(Emitter& e) {
+    ssa location = Absolute(e);
     e.IncCycle();
 
     ssa address_low = e.Read(location);
     ssa location_next = e.Add(location, 1);
     ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
     ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
+
     e.IncCycle();
 
     ssa address_high = e.Read(wrapped);
-    ssa address = e.Cat(address_high, address_low);
 
-    ssa indexed_address = e.Add(address, e.state[Y]);
-    // TODO: Dummy Read to AAH,AAL+YL
-
-    e.IncCycle();
-
-    return e.Cat(e.state[DBR], indexed_address);
+    return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
 }
 
 ssa StackRelative(Emitter& e) {

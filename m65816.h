@@ -60,6 +60,8 @@ ssa IndexYIndirectDirect(Emitter& e);
 
 ssa IndexYIndirectDirectStore(Emitter& e);
 
+ssa IndirectAbsolute(Emitter& e);
+
 ssa StackRelative(Emitter& e);
 
 
