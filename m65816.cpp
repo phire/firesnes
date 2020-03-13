@@ -177,7 +177,7 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
         // TODO: Dummy read to same address as previous=
         e.IncCycle();
 
-        e.Write(address, e.Extract(result, 8, 0));
+        e.Write(address, result);
         e.IncCycle();
     });
 
@@ -192,10 +192,10 @@ static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
         // TODO: Dummy read to same address as previous=
         e.IncCycle();
 
-        e.Write(high_address, e.Extract(result, 8, 0));
+        e.Write(high_address, e.Extract(result, 8, 8));
         e.IncCycle();
 
-        e.Write(address, e.Extract(result, 8, 0));
+        e.Write(address, e.Extract(result, 0, 8));
         e.IncCycle();
     });
 }
