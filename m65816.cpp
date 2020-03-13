@@ -396,7 +396,12 @@ void populate_tables() {
         apply(0x07, IndirectDirectLong);    // [d]
         // T[def.op_base + 0x13] = Instruction(def.name, StackRelativeIndirectIndexed<def.fn>); // (d,s),y
         apply(0x01, IndirectDirectIndexX);  // (d,x)
-        //T[def.op_base + 0x11] = Instruction(def.name, DirectIndirectIndexed<def.fn>);     // (d),y
+        if (std::string(name) == "STA") {
+            // Store uses an alternative version of this addressing mode that always takes the overflow cycle
+            apply(0x11, IndexYIndirectDirectStore);  // (d),y
+        } else {
+            apply(0x11, IndexYIndirectDirect);  // (d),y
+        }
         // T[def.op_base + 0x17] = Instruction(def.name, DirectIndirectLongIndexed<def.fn>); // [d],y
         if (std::string(name) != "STA") { // Can't store to an immidate
             insert(op_base + 0x09, name, [fn] (Emitter& e) { ApplyImmediate(e, fn); });

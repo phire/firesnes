@@ -147,6 +147,61 @@ ssa IndirectDirectIndexX(Emitter& e) {
     return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
 }
 
+static ssa IndexYIndirectDirectInner(Emitter& e, bool store) {
+    ssa location = Direct(e);
+    e.IncCycle();
+
+    ssa address_low = e.Read(location);
+    ssa location_next = e.Add(location, 1);
+    ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
+    ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
+    e.IncCycle();
+
+    ssa address_high = e.Read(wrapped);
+    ssa address = e.Cat(address_high, address_low);
+
+    ssa indexed_address = e.Add(address, e.state[Y]);
+    // TODO: Dummy Read to AAH,AAL+YL
+
+    ssa overflow = e.Neq(address_high, e.Extract(indexed_address, 8, 8));
+    if (store) {
+        e.IncCycle();
+    } else {
+        e.If(overflow, [&] {
+            e.IncCycle();
+        });
+    }
+
+    return e.Cat(e.state[DBR], indexed_address);
+}
+
+ssa IndexYIndirectDirect(Emitter& e) {
+    return IndexYIndirectDirectInner(e, false);
+}
+
+
+ssa IndexYIndirectDirectStore(Emitter& e) {
+    return IndexYIndirectDirectInner(e, true);
+}
+    e.IncCycle();
+
+    ssa address_low = e.Read(location);
+    ssa location_next = e.Add(location, 1);
+    ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
+    ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
+    e.IncCycle();
+
+    ssa address_high = e.Read(wrapped);
+    ssa address = e.Cat(address_high, address_low);
+
+    ssa indexed_address = e.Add(address, e.state[Y]);
+    // TODO: Dummy Read to AAH,AAL+YL
+
+    e.IncCycle();
+
+    return e.Cat(e.state[DBR], indexed_address);
+}
+
 ssa StackRelative(Emitter& e) {
     ssa offset = ReadPc16(e);
 
