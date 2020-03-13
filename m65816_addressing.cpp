@@ -131,6 +131,22 @@ ssa IndirectDirectLong(Emitter& e) {
     return e.Cat(address_highest, e.Cat(address_high, address_low));
 }
 
+ssa IndirectDirectIndexX(Emitter& e) {
+    ssa location = DirectIndex<X>(e);
+    e.IncCycle();
+
+    ssa address_low = e.Read(location);
+    ssa location_next = e.Add(location, 1);
+    ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
+    ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
+
+    e.IncCycle();
+
+    ssa address_high = e.Read(wrapped);
+
+    return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
+}
+
 ssa StackRelative(Emitter& e) {
     ssa offset = ReadPc16(e);
 

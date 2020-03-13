@@ -395,8 +395,8 @@ void populate_tables() {
         apply(0x12, IndirectDirect);        // (d)
         apply(0x07, IndirectDirectLong);    // [d]
         // T[def.op_base + 0x13] = Instruction(def.name, StackRelativeIndirectIndexed<def.fn>); // (d,s),y
-        // T[def.op_base + 0x01] = Instruction(def.name, DirectIndexedIndirect<def.fn>);     // (d,x)
-        // T[def.op_base + 0x11] = Instruction(def.name, DirectIndirectIndexed<def.fn>);     // (d),y
+        apply(0x01, IndirectDirectIndexX);  // (d,x)
+        //T[def.op_base + 0x11] = Instruction(def.name, DirectIndirectIndexed<def.fn>);     // (d),y
         // T[def.op_base + 0x17] = Instruction(def.name, DirectIndirectLongIndexed<def.fn>); // [d],y
         if (std::string(name) != "STA") { // Can't store to an immidate
             insert(op_base + 0x09, name, [fn] (Emitter& e) { ApplyImmediate(e, fn); });
@@ -1067,7 +1067,7 @@ void interpeter_loop() {
     u64 cycle = 0;
 
 
-    int count = 1500;
+    int count = 3000;
 
     while (count-- > 0) {
 
