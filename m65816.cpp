@@ -566,10 +566,14 @@ void populate_tables() {
                          e.Write(addr, e.Extract(e.state[reg], 0, 8));
                     } else {
                             val_low = e.Read(addr);
+                            if (type == CMP) {
+                                ssa dst_low = e.Extract(e.state[reg], 0, 8);
+                                compare(e, dst_low, val_low);
+                            }
                             if (type == LOAD) {
                                 e.state[reg] = e.Cat(e.Const<8>(0), val_low);
+                                nz_flags(e, val_low);
                             }
-                            nz_flags(e, val_low);
                     }
                     e.IncCycle();
 
@@ -579,10 +583,14 @@ void populate_tables() {
                             e.Write(addr2, e.Extract(e.state[reg], 8, 8));
                         } else {
                             ssa val_high = e.Read(addr);
+                            if (type == CMP) {
+                                ssa dst_high = e.Extract(e.state[reg], 8, 8);
+                                compare(e, dst_high, val_high);
+                            }
                             if (type == LOAD) {
                                 e.state[reg] = e.Cat(val_high, val_low);
+                                nz_flags(e, val_high);
                             }
-                            nz_flags(e, val_high);
                         }
                         e.IncCycle();
                     });
@@ -624,8 +632,7 @@ void populate_tables() {
                     e.If(wide, [&] () {
                         high = ReadPc(e);
                         ssa dst_high = e.Extract(e.state[reg], 8, 8);
-                        compare(e, dst_high, low);
-                        nz_flags(e, high);
+                        compare(e, dst_high, high);
                     });
                 });
             }
@@ -1067,7 +1074,7 @@ void interpeter_loop() {
     u64 cycle = 0;
 
 
-    int count = 3000;
+    int count = 6000;
 
     while (count-- > 0) {
 
