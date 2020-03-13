@@ -152,11 +152,10 @@ struct IR3 : public IR_Base {
     bool is() const { return id == op; }
 };
 
-template<u8 bits, bool _signed>
+template<bool _signed>
 struct IR_Const : public IR_Base {
     //IR_Const(const IR_Base *base) { hex = base->hex; }
-    template<typename T>
-    IR_Const(T i) : IR_Base(Opcode::Const, bits, _signed, u32(i)) { static_assert(sizeof(T) <= sizeof(u32)); }
+    IR_Const(u32 i, u8 bits = 32) : IR_Base(Opcode::Const, bits, _signed, i) { }
     bool is() const { return id == Opcode::Const; }
 };
 
@@ -172,10 +171,7 @@ using IR_Zext    = IR2<Opcode::Zext>;
 using IR_Ternary = IR3<Opcode::Ternary>;
 using IR_ShiftLeft = IR2<Opcode::ShiftLeft>;
 using IR_ShiftRight = IR2<Opcode::ShiftRight>;
-using IR_Const8  = IR_Const<8,  false>;
-using IR_Const16 = IR_Const<16, false>;
-using IR_Const24 = IR_Const<24, false>;
-using IR_Const32 = IR_Const<32, false>;
+using IR_Const32 = IR_Const<false>;
 using IR_MemState = IR3<Opcode::memState>;
 using IR_Load8 = IR2<Opcode::load8>;
 using IR_Load16 = IR2<Opcode::load16>;

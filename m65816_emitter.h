@@ -42,17 +42,21 @@ public:
 
     std::map<Reg, ssa> state;
 
-    template<u8 bits>
-    ssa Const(u32 a) {
-        // Cache constants to make our IR smaller
+    ssa Const(u32 a, int bits) {
+         // Cache constants to make our IR smaller
         u64 index = a | u64(bits) << 32;
 
         if (consts_cache.find(index) != consts_cache.end()) {
             return consts_cache[index];
         }
-        ssa constant = push(IR_Const<bits, false>(a));
+        ssa constant = push(IR_Const<false>(a, bits));
         consts_cache[index] = constant;
         return constant;
+    }
+
+    template<u8 bits>
+    ssa Const(u32 a) {
+       return Const(a, bits);
     }
 
     ssa IncPC() {

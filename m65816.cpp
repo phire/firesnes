@@ -148,47 +148,56 @@ static void ApplyImmediate(Emitter& e, inner_fn operation) {
 }
 
 
-using rmw_fn = std::function<ssa(Emitter&, ssa)>;
+using rmw_fn = std::function<ssa(Emitter&, ssa, int width)>;
 
 static void ApplyAcc(Emitter& e, rmw_fn operation) {
-    e.state[A] = operation(e, e.state[A]);
     e.IncCycle();
 
+    // 8 bit version
+    e.If(e.state[Flag_M], [&] () {
+        e.state[A] = operation(e, e.state[A], 8);
+    });
+
+    // 16 bit version
     e.If(e.Not(e.state[Flag_M]), [&] () {
-        e.state[B] = operation(e, e.state[B]);
+        ssa result = operation(e, e.Cat(e.state[B], e.state[A]), 16);
+        e.state[A] = e.Extract(result, 0, 8);
+        e.state[B] = e.Extract(result, 8, 8);
         e.IncCycle();
     });
 }
 
 static void ApplyModify(Emitter& e, rmw_fn operation, ssa address) {
     ssa low = e.Read(address);
-        e.IncCycle();
-
-    ssa word = e.Not(e.state[Flag_M]);
-    ssa high_address = e.Add(address, e.Const<24>(1));
-
-    // Read High
-    ssa high;
-    e.If(word, [&] () {
-        high = e.Read(high_address);
-        e.IncCycle();
-    });
-    ssa value = e.Cat(e.Ternary(word, high, e.Const<8>(0)), low);
-
-    // Internal operation
-    // TODO: Dummy read to same address as previous
-    ssa result = operation(e, value);
     e.IncCycle();
 
-    // Writeback High
-    e.If(word, [&] () {
-        e.Write(high_address, e.ShiftRight(result, 8));
+    // 8 bit version
+    e.If(e.state[Flag_M], [&] () {
+        ssa result = operation(e, low, 8);
+        // TODO: Dummy read to same address as previous=
+        e.IncCycle();
+
+        e.Write(address, e.Extract(result, 8, 0));
         e.IncCycle();
     });
 
-    // Writeback Low
-    e.Write(address, e.And(result, e.Const<16>(255)));
-    e.IncCycle();
+    // 16 bit version
+    e.If(e.Not(e.state[Flag_M]), [&] () {
+        ssa high_address = e.Add(address, e.Const<24>(1));
+        ssa high = e.Read(high_address);
+        ssa value = e.Cat(high, low);
+        e.IncCycle();
+
+        ssa result = operation(e, value, 16);
+        // TODO: Dummy read to same address as previous=
+        e.IncCycle();
+
+        e.Write(high_address, e.Extract(result, 8, 0));
+        e.IncCycle();
+
+        e.Write(address, e.Extract(result, 8, 0));
+        e.IncCycle();
+    });
 }
 
 // Calculates zero flag of an 8bit result. Chains to 16bits
@@ -305,16 +314,17 @@ static void storeReg16(Emitter &e, Reg reg, ssa value, bool force16 = false) {
     }
     case X:
     case Y: {
+        ssa old_upper = e.Extract(e.state[reg], 8, 8);
+
         // Do the 16bit write first
-        //e.state[reg] = value;
-        //nz_flags16(e, value); // All writes to A/B modify flags
+        e.state[reg] = value;
+        nz_flags16(e, value); // All writes to A/B modify flags
         if (force16)
             return;
 
         // Fall back to an 8bit write when Flag_X is 1
         e.If(e.state[Flag_X], [&] () {
             ssa low = e.Extract(value, 0, 8);
-            ssa old_upper = e.Extract(e.state[reg], 8, 8);
             e.state[reg] = e.Cat(old_upper, low);
             nz_flags(e, low);
         });
@@ -405,8 +415,8 @@ void populate_tables() {
     // General Read-Modify-Write instructions:
     //      dir     abs     dir,x   abs,x   acc
     // ASL  06      0e      16      1e      0a
-    // LSR  46      4e      56      5e      4a
     // ROL  26      2e      36      3e      2a
+    // LSR  46      4e      56      5e      4a
     // ROR  66      6e      76      7e      6a
     // INC  e6      ee      f6      fe     <1a>
     // DEC  c6      ce      d6      de     <3a>
@@ -432,34 +442,46 @@ void populate_tables() {
         }
     };
 
-    rwm("ASL", 0x00, [] (Emitter& e, ssa val) {
-        e.state[Flag_C] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(7), e.Const<32>(15)), 1);
-        e.state[Flag_N] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(6), e.Const<32>(14)), 1);
-        e.state[Flag_Z] = e.Eq(e.Extract(val, 0, 15), e.Const<15>(0));
-        return e.Cat(e.Extract(val, 0, 15), e.Const<1>(0));
+    rwm("ASL", 0x00, [] (Emitter& e, ssa val, int width) {
+        ssa result = e.Cat(e.Extract(val, 0, width-1), e.Const<1>(0));
+        e.state[Flag_C] = e.Extract(val, width-1, 1);
+        e.state[Flag_N] = e.Extract(val, width-2, 1);
+        e.state[Flag_Z] = e.Eq(result, e.Const(0, width));
+        return result;
     });
-    rwm("LSR", 0x40, [] (Emitter& e, ssa val) {
+    rwm("ROL", 0x20, [] (Emitter& e, ssa val, int width) {
+        ssa result = e.Cat(e.Extract(val, 0, width-1), e.state[Flag_C]);
+        e.state[Flag_C] = e.Extract(val, width-1, 1);
+        e.state[Flag_N] = e.Extract(val, width-2, 1);
+        e.state[Flag_Z] = e.Eq(result, e.Const(0, width));
+        return result;
+    });
+    rwm("LSR", 0x40, [] (Emitter& e, ssa val, int width) {
+        ssa result = e.Cat(e.Const<1>(0), e.Extract(val, 1, width-1));
         e.state[Flag_C] = e.Extract(val, 0, 1);
         e.state[Flag_N] = e.Const<1>(0); // Top bit is always zero
-        e.state[Flag_Z] = e.Eq(e.Extract(val, 1, 15), e.Const<15>(0));
-        return e.Cat(e.Extract(val, 0, 15), e.Const<1>(0));
-    });
-    rwm("ROL", 0x20, [] (Emitter& e, ssa val) {
-        ssa result = e.Cat(e.Extract(val, 0, 15), e.state[Flag_C]);
-        e.state[Flag_C] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(7), e.Const<32>(15)), 1);
-        e.state[Flag_N] = e.Extract(val, e.Ternary(e.state[Flag_M], e.Const<32>(6), e.Const<32>(14)), 1);
-        e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+        e.state[Flag_Z] = e.Eq(result, e.Const(0, width));
         return result;
     });
-    rwm("ROR", 0x60, [] (Emitter& e, ssa val) {
-        ssa result = e.Cat(e.state[Flag_C], e.Extract(val, 1, 15));
+    rwm("ROR", 0x60, [] (Emitter& e, ssa val, int width) {
+        ssa result = e.Cat(e.state[Flag_C], e.Extract(val, 1, width-1));
         e.state[Flag_N] = e.state[Flag_C];
         e.state[Flag_C] = e.Extract(val, 0, 1);
-        e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
+        e.state[Flag_Z] = e.Eq(result, e.Const(0, width));
         return result;
     });
-    rwm("INC", 0xe0, [] (Emitter& e, ssa val) { return e.Add(val,   e.Const<16>(1)); });
-    rwm("DEC", 0xc0, [] (Emitter& e, ssa val) { return e.Sub(val,   e.Const<16>(1)); });
+    rwm("INC", 0xe0, [] (Emitter& e, ssa val, int width) {
+        ssa result = e.Add(val, e.Const(1, width));
+        e.state[Flag_N] = e.Extract(result, width-1, 1);
+        e.state[Flag_Z] = e.Eq(result, e.Const(0, width));
+        return result;
+    });
+    rwm("DEC", 0xc0, [] (Emitter& e, ssa val, int width) {
+        ssa result = e.Sub(val, e.Const(1, width));
+        e.state[Flag_N] = e.Extract(result, width-1, 1);
+        e.state[Flag_Z] = e.Eq(result, e.Const(0, width));
+        return result;
+    });
 
     // Bit instructions:
     //      dir   abs     dir,x   abs,x  !imm!
@@ -1053,8 +1075,8 @@ void interpeter_loop() {
         u8 opcode = memory[pc];
 
         u64 nes_cycle    = (cycle * 3) % 341;
-        u64 nes_scanline = (341 * 241 + (cycle * 3)) / 341;
-        printf("%04X  %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%3i SL:%3i\n", pc, opcode, a, x, y, p, sp, nes_cycle, nes_scanline);
+        u64 nes_scanline = ((341 * 242 + (cycle * 3)) / 341) % 262 - 1;
+        printf("%04X  %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%3i SL:%i\n", pc, opcode, a, x, y, p, sp, nes_cycle, nes_scanline);
 
         m65816::emit(e, opcode);
         partial_interpret(e.buffer, ssalist, ssatype, offset);
