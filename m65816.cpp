@@ -80,31 +80,8 @@ void Emitter::Finalize() {
     finaliseReg<64>(CYCLE);
 }
 
-// Reads 8 or 16 bytes from PC depending on the Reg register
-static ssa ReadPc(Emitter& e, Reg reg) {
-    ssa low = ReadPc(e);
-
-    ssa wide = e.Not(e.state[reg]);
-
-    ssa high;
-    e.If(wide, [&] () {
-        high = ReadPc(e);
-    });
-
-    return e.Cat(e.Ternary(wide, high, e.Const<8>(0)), low);
-}
-
-// Reads 8 or 16 bytes from PC depending on the M register
-static ssa ReadPcM(Emitter& e) {
-    return ReadPc(e, Flag_M);
-}
-
-// Reads 8 or 16 bytes from PC depending on the X register
-static ssa ReadPcX(Emitter& e) {
-    return ReadPc(e, Flag_X);
-}
-
 using inner_fn = std::function<void(Emitter&, ssa&, ssa)>;
+using rmw_fn = std::function<ssa(Emitter&, ssa, int width)>;
 
 // Given an address, applies a read or write operation.
 // Applis the operation twice when M = 0
@@ -113,19 +90,6 @@ static void ApplyMemoryOperation(Emitter& e, inner_fn operation, ssa address) {
     e.IncCycle();
 
     e.If(e.Not(e.state[Flag_M]), [&] () {
-        ssa address2 = e.Add(address, 1);
-        operation(e, e.state[B], address2);
-        e.IncCycle();
-    });
-}
-
-// Given an address, applies a read or write operation.
-// Applis the operation twice when X = 0
-static void ApplyIndexOperation(Emitter& e, inner_fn operation, ssa address) {
-    operation(e, e.state[A], address);
-    e.IncCycle();
-
-    e.If(e.Not(e.state[Flag_X]), [&] () {
         ssa address2 = e.Add(address, 1);
         operation(e, e.state[B], address2);
         e.IncCycle();
@@ -146,9 +110,6 @@ static void ApplyImmediate(Emitter& e, inner_fn operation) {
         operation(e, e.state[B], immediate_address);
     });
 }
-
-
-using rmw_fn = std::function<ssa(Emitter&, ssa, int width)>;
 
 static void ApplyAcc(Emitter& e, rmw_fn operation) {
     e.IncCycle();
@@ -235,6 +196,7 @@ static void nvz_flags(Emitter &e, ssa result) {
 }
 
 static void add_carry(Emitter& e, ssa& dst, ssa val) {
+    // TODO: Decimal mode
     ssa result = e.Add(e.Zext<9>(dst), e.Add(e.Zext<9>(val), e.Zext<9>(e.state[Flag_C])));
     e.state[Flag_C] = e.Extract(result, 8, 1);
     dst = e.Extract(result, 0, 8);
@@ -250,6 +212,7 @@ static void add_carry_overflow(Emitter& e, ssa& dst, ssa val) {
 }
 
 static void subtract_borrow(Emitter& e, ssa& dst, ssa val) {
+    // TODO: Decimal mode
     add_carry_overflow(e, dst, e.Xor(e.Const<8>(0xff), val));
 }
 
@@ -530,12 +493,18 @@ void populate_tables() {
         apply_bit(0x0c, Absolute);
         apply_bit(0x14, DirectIndex<X>);
         apply_bit(0x1c, AbsoluteIndex<X>);
-        insert(0x89, "BIT", [] (Emitter &e) {
-            ssa value = ReadPcM(e);
-            ssa acc_high = e.Ternary(e.state[Flag_M], e.Const<8>(0), e.state[B]);
-            ssa acc = e.Cat(acc_high, e.state[A]);
 
-            ssa result = e.And(value, acc);
+        insert(0x89, "BIT", [] (Emitter &e) {
+            ssa low = ReadPc(e);
+            ssa wide = e.Not(e.state[Flag_M]);
+
+            ssa high;
+            e.If(wide, [&] () {
+                high = ReadPc(e);
+            });
+            ssa value = e.Cat(e.Ternary(wide, high, e.Const<8>(0)), low);
+
+            ssa result = e.And(value, loadReg16(e, A));
 
             // Only sets Z
             e.state[Flag_Z] = e.Eq(result, e.Const<16>(0));
