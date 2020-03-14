@@ -10,14 +10,12 @@ ssa ReadPc(Emitter& e) {
     return data;
 }
 
-
 ssa ReadPc16(Emitter& e) {
     ssa data_low = ReadPc(e);
     ssa data_high = ReadPc(e);
     ssa data = e.Cat(data_high, data_low);
     return data;
 }
-
 
 ssa Absolute(Emitter& e, bool is_store) {
     return e.Cat(e.state[DBR], ReadPc16(e));
@@ -101,18 +99,24 @@ ssa DirectIndex(Emitter& e, bool is_store) {
 template ssa DirectIndex<X>(Emitter& e, bool is_store = false);
 template ssa DirectIndex<Y>(Emitter& e, bool is_store = false);
 
-ssa IndirectDirect(Emitter& e, bool is_store) {
-    ssa location = Direct(e);
+static ssa Indirect16(Emitter& e, ssa location) {
     e.IncCycle();
 
     ssa address_low = e.Read(location);
-    ssa location_next = e.Add(location, 1);
-
+    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
     e.IncCycle();
 
     ssa address_high = e.Read(location_next);
 
-    return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
+    return e.Cat(address_high, address_low);
+}
+
+ssa IndirectAbsolute(Emitter& e, bool is_store) {
+    return e.Cat(e.state[DBR], Indirect16(e, Absolute(e)));
+}
+
+ssa IndirectDirect(Emitter& e, bool is_store) {
+    return e.Cat(e.state[DBR], Indirect16(e, Direct(e)));
 }
 
 ssa IndirectDirectLong(Emitter& e, bool is_store) {
@@ -134,33 +138,16 @@ ssa IndirectDirectLong(Emitter& e, bool is_store) {
 }
 
 ssa IndirectDirectIndexX(Emitter& e, bool is_store) {
-    ssa location = DirectIndex<X>(e);
-    e.IncCycle();
-
-    ssa address_low = e.Read(location);
-    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
-    e.IncCycle();
-
-    ssa address_high = e.Read(location_next);
-
-    return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
+    return e.Cat(e.state[DBR], Indirect16(e, DirectIndex<X>(e)));
 }
 
 ssa IndexYIndirectDirect(Emitter& e, bool is_store) {
-    ssa location = Direct(e);
-    e.IncCycle();
-
-    ssa address_low = e.Read(location);
-    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
-    e.IncCycle();
-
-    ssa address_high = e.Read(location_next);
-    ssa address = e.Cat(address_high, address_low);
+    ssa address = Indirect16(e, Direct(e));
 
     ssa indexed_address = e.Add(address, e.state[Y]);
     // TODO: Dummy Read to AAH,AAL+YL
 
-    ssa overflow = e.Neq(address_high, e.Extract(indexed_address, 8, 8));
+    ssa overflow = e.Neq(e.Extract(address, 8, 8), e.Extract(indexed_address, 8, 8));
     if (is_store) {
         e.IncCycle();
     } else {
@@ -170,21 +157,6 @@ ssa IndexYIndirectDirect(Emitter& e, bool is_store) {
     }
 
     return e.Cat(e.state[DBR], indexed_address);
-}
-
-
-ssa IndirectAbsolute(Emitter& e, bool is_store) {
-    ssa location = Absolute(e);
-    e.IncCycle();
-
-    ssa address_low = e.Read(location);
-    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
-
-    e.IncCycle();
-
-    ssa address_high = e.Read(location_next);
-
-    return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
 }
 
 ssa StackRelative(Emitter& e, bool is_store ) {
