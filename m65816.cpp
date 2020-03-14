@@ -380,8 +380,11 @@ void populate_tables() {
     // These are universal instructions that do A <--> Memory operations with almost every addressing mode
 
     auto universal = [&] (const char* name, size_t op_base, inner_fn fn) {
-        auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-            insert(op_base | sub_op, name, [fn, address_fn] (Emitter& e) {ApplyMemoryOperation(e, fn, address_fn(e)); });
+        auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&, bool)> address_fn) {
+            bool is_store = std::string(name) == "STA";
+            insert(op_base | sub_op, name, [fn, address_fn, is_store] (Emitter& e) {
+                ApplyMemoryOperation(e, fn, address_fn(e, is_store));
+            });
         };
 
         apply(0x0d, Absolute);              // a
@@ -396,12 +399,7 @@ void populate_tables() {
         apply(0x07, IndirectDirectLong);    // [d]
         // T[def.op_base + 0x13] = Instruction(def.name, StackRelativeIndirectIndexed<def.fn>); // (d,s),y
         apply(0x01, IndirectDirectIndexX);  // (d,x)
-        if (std::string(name) == "STA") {
-            // Store uses an alternative version of this addressing mode that always takes the overflow cycle
-            apply(0x11, IndexYIndirectDirectStore);  // (d),y
-        } else {
-            apply(0x11, IndexYIndirectDirect);  // (d),y
-        }
+        apply(0x11, IndexYIndirectDirect);  // (d),y
         // T[def.op_base + 0x17] = Instruction(def.name, DirectIndirectLongIndexed<def.fn>); // [d],y
         if (std::string(name) != "STA") { // Can't store to an immidate
             insert(op_base + 0x09, name, [fn] (Emitter& e) { ApplyImmediate(e, fn); });
@@ -430,8 +428,8 @@ void populate_tables() {
     // Doesn't include the bit RWM instructions below
 
     auto rwm = [&] (const char* name, size_t op_base, rmw_fn fn) {
-        auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-            insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
+        auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&, bool)> address_fn) {
+            insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e, true)); });
         };
 
         apply(0x06, Direct);
@@ -495,8 +493,8 @@ void populate_tables() {
     // BIT  24    2c      34      3c     <89>
 
     auto bit_rmw = [&] (const char* name, size_t op_base, rmw_fn fn) {
-        auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
-            insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e)); });
+        auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&, bool)> address_fn) {
+            insert(op_base + sub_op, name, [fn, address_fn] (Emitter& e) { ApplyModify(e, fn, address_fn(e, true)); });
         };
 
         apply(0x04, Direct);
@@ -515,7 +513,7 @@ void populate_tables() {
     //bit_rmw("TSB", 0x00, [] (Emitter& e, ssa val) { return e.Or(val, e.state[A]); });
 
     {
-        auto apply_bit = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
+        auto apply_bit = [&] (size_t sub_op, std::function<ssa(Emitter&m, bool)> address_fn) {
             insert(0x20 | sub_op, "BIT", [address_fn] (Emitter& e) {
                 auto fn = [] (Emitter &e, ssa &dst, ssa address) {
                     ssa val =  e.Read(address);
@@ -524,7 +522,7 @@ void populate_tables() {
                     ssa result = e.And(dst, val);
                     zero_flag(e, result);
                 };
-                ApplyMemoryOperation(e, fn, address_fn(e));
+                ApplyMemoryOperation(e, fn, address_fn(e, false));
             });
         };
 
@@ -563,9 +561,9 @@ void populate_tables() {
         };
 
         auto idxmem = [&] (const char* name, size_t op_base, idxmem_type type, Reg reg) {
-            auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&)> address_fn) {
+            auto apply = [&] (size_t sub_op, std::function<ssa(Emitter&, bool)> address_fn) {
                 insert(op_base + sub_op, name, [type, reg, address_fn] (Emitter& e) {
-                    ssa addr = address_fn(e);
+                    ssa addr = address_fn(e, false);
                     ssa val_low;
                     if (type == STORE) {
                          e.Write(addr, e.Extract(e.state[reg], 0, 8));
@@ -658,8 +656,8 @@ void populate_tables() {
     // But its cleanly been stuffed into free slots.
 
     {
-        auto stz = [&] (size_t opcode, std::function<ssa(Emitter&)> address_fn) {
-            insert(opcode, "STZ", [address_fn] (Emitter& e) { e.Write(address_fn(e), e.Const<8>(0)); e.IncCycle();});
+        auto stz = [&] (size_t opcode, std::function<ssa(Emitter&, bool)> address_fn) {
+            insert(opcode, "STZ", [address_fn] (Emitter& e) { e.Write(address_fn(e, true), e.Const<8>(0)); e.IncCycle();});
         };
         stz(0x64, Direct);
         stz(0x9c, Absolute);
@@ -897,9 +895,9 @@ void populate_tables() {
 
     // No real pattern to extract here.
 
-    auto jump = [&] (const char* name, size_t opcode, std::function<ssa(Emitter&)> address_fn, bool subroutine) {
+    auto jump = [&] (const char* name, size_t opcode, std::function<ssa(Emitter&, bool)> address_fn, bool subroutine) {
         insert(opcode, name, [address_fn, subroutine] (Emitter& e) {
-            ssa long_address = address_fn(e);
+            ssa long_address = address_fn(e, false);
             if (subroutine) {
                 // TODO: Dummy Read to PBR,PC+2
                 e.IncCycle(); // Internal operation

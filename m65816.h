@@ -36,33 +36,33 @@ ssa ReadPc(Emitter& e);
 
 ssa ReadPc16(Emitter& e);
 
-ssa Absolute(Emitter& e);
+ssa Absolute(Emitter& e, bool is_store = false);
 
-ssa AbsoluteLong(Emitter& e);
-
-template<Reg indexreg>
-ssa AbsoluteIndex(Emitter& e);
-
-ssa AbsoluteLongX(Emitter& e);
-
-ssa Direct(Emitter& e);
+ssa AbsoluteLong(Emitter& e, bool is_store = false);
 
 template<Reg indexreg>
-ssa DirectIndex(Emitter& e);
+ssa AbsoluteIndex(Emitter& e, bool is_store = false);
 
-ssa IndirectDirect(Emitter& e);
+ssa AbsoluteLongX(Emitter& e, bool is_store = false);
 
-ssa IndirectDirectLong(Emitter& e);
+ssa Direct(Emitter& e, bool is_store = false);
 
-ssa IndirectDirectIndexX(Emitter& e);
+template<Reg indexreg>
+ssa DirectIndex(Emitter& e, bool is_store = false);
 
-ssa IndexYIndirectDirect(Emitter& e);
+ssa IndirectDirect(Emitter& e, bool is_store = false);
 
-ssa IndexYIndirectDirectStore(Emitter& e);
+ssa IndirectDirectLong(Emitter& e, bool is_store = false);
 
-ssa IndirectAbsolute(Emitter& e);
+ssa IndirectDirectIndexX(Emitter& e, bool is_store = false);
 
-ssa StackRelative(Emitter& e);
+ssa IndexYIndirectDirect(Emitter& e, bool is_store = false);
+
+ssa IndexYIndirectDirectStore(Emitter& e, bool is_store = false);
+
+ssa IndirectAbsolute(Emitter& e, bool is_store = false);
+
+ssa StackRelative(Emitter& e, bool is_store = false);
 
 
 }
