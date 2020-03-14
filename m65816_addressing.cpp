@@ -29,6 +29,13 @@ ssa AbsoluteLong(Emitter& e, bool is_store) {
     return e.Cat(high, low);
 }
 
+// Adds two addresses, wrapping on the page boundary depending on flag
+static ssa AddWrapped(Emitter&e, ssa a, ssa b, Reg flag) {
+    ssa wrap = e.state[flag];
+
+    ssa address = e.Add(a, b);
+    return e.Ternary(wrap, e.Cat(e.Extract(a, 8, 8), e.Extract(address, 0, 8)), address);
+}
 
 // Adds one of the index registers (X or Y) to the address.
 // handles adds extra cycles when required by page cross or the X flag.
@@ -54,7 +61,6 @@ static ssa AddIndexReg(Emitter& e, Reg reg, ssa address, bool is_store) {
     return new_address;
 }
 
-
 template<Reg indexreg>
 ssa AbsoluteIndex(Emitter& e, bool is_store) {
     return e.Cat(e.state[DBR], AddIndexReg(e, indexreg, ReadPc16(e), is_store));
@@ -67,44 +73,29 @@ ssa AbsoluteLongX(Emitter& e, bool is_store) {
     return e.Add(AbsoluteLong(e), e.Cat(e.Const<8>(0), e.state[X]));
 }
 
-ssa Direct(Emitter& e, bool is_store) {
+static ssa Direct16(Emitter & e) {
     ssa offset = ReadPc(e);
-    ssa overflow = e.Neq(e.Const<16>(0x0000), e.And(e.state[D], e.Const<16>(0x00ff)));
+    ssa DL_cycle = e.Neq(e.Const<8>(0), e.Extract(e.state[D], 0, 8));
 
-    // FIXME: Docs seem to conflict about if this overflow cycle penalty goes away in 16bit mode too
-    e.If(overflow, [&] {
+    e.If(DL_cycle, [&] {
         // TODO: Dummy read to PBR,PC+1
         e.IncCycle();
     });
 
-    return e.Cat(e.Const<8>(0), e.Add(e.state[D], offset));
+    return e.Add(e.state[D], offset);
+}
+
+ssa Direct(Emitter& e, bool is_store) {
+    return e.Cat(e.Const<8>(0), Direct16(e));
 }
 
 template<Reg indexreg>
 ssa DirectIndex(Emitter& e, bool is_store) {
-    ssa offset = ReadPc(e);
-    ssa overflow = e.Neq(e.Const<16>(0x0000), e.And(e.state[D], e.Const<16>(0x00ff)));
-    ssa wrap = e.And(e.Not(overflow), e.state[Flag_E]);
+    ssa direct = Direct16(e);
+    ssa address = AddWrapped(e, direct, e.state[indexreg], Flag_X);
+    e.IncCycle();
 
-    ssa wrapped = e.Or(e.And(e.state[D], e.Const<16>(0xff00)), e.And(e.Const<16>(0x00ff), e.Add(e.state[indexreg], offset)));
-    ssa overflowed = e.Add(e.state[indexreg], offset);
-    ssa address = e.Ternary(wrap, wrapped, overflowed);
-
-    // TODO: Dummy read to PBR,PC+1
-    e.IncCycle(); // Cycle to do add
-
-    // Store operations always have an extra cycle, even if not overflowing
-    if (is_store) {
-        // TODO: Dummy read to PBR,PC+1
-        //e.IncCycle(); // Cycle to continue add
-    } else {
-        e.If(overflow, [&] {
-            // TODO: Dummy read to PBR,PC+1
-            e.IncCycle(); // Cycle to continue add
-        });
-    }
-
-    return e.Cat(e.Const<8>(0), e.Add(e.state[D], address));
+    return e.Cat(e.Const<8>(0), address);
 }
 
 template ssa DirectIndex<X>(Emitter& e, bool is_store = false);
@@ -147,29 +138,23 @@ ssa IndirectDirectIndexX(Emitter& e, bool is_store) {
     e.IncCycle();
 
     ssa address_low = e.Read(location);
-    ssa location_next = e.Add(location, 1);
-    ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
-    ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
-
+    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
     e.IncCycle();
 
-    ssa address_high = e.Read(wrapped);
+    ssa address_high = e.Read(location_next);
 
     return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
 }
-
 
 ssa IndexYIndirectDirect(Emitter& e, bool is_store) {
     ssa location = Direct(e);
     e.IncCycle();
 
     ssa address_low = e.Read(location);
-    ssa location_next = e.Add(location, 1);
-    ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
-    ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
+    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
     e.IncCycle();
 
-    ssa address_high = e.Read(wrapped);
+    ssa address_high = e.Read(location_next);
     ssa address = e.Cat(address_high, address_low);
 
     ssa indexed_address = e.Add(address, e.state[Y]);
@@ -193,13 +178,11 @@ ssa IndirectAbsolute(Emitter& e, bool is_store) {
     e.IncCycle();
 
     ssa address_low = e.Read(location);
-    ssa location_next = e.Add(location, 1);
-    ssa wrapped_location = e.Cat(e.Extract(location, 8, 8), e.Extract(location_next, 0, 8));
-    ssa wrapped = e.Ternary(e.state[Flag_E], wrapped_location, location_next);
+    ssa location_next = AddWrapped(e, location, e.Const<24>(1), Flag_E);
 
     e.IncCycle();
 
-    ssa address_high = e.Read(wrapped);
+    ssa address_high = e.Read(location_next);
 
     return e.Cat(e.state[DBR], e.Cat(address_high, address_low));
 }
@@ -212,6 +195,5 @@ ssa StackRelative(Emitter& e, bool is_store ) {
 
     return e.Cat(e.Const<8>(0), e.Add(e.state[S], offset));
 }
-
 
 }
