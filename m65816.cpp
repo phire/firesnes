@@ -513,29 +513,8 @@ void populate_tables() {
         });
     };
 
-    push("PHP", 0x08, STACK_8, [] (Emitter &e) {
-        ssa n = e.ShiftLeft(e.state[Flag_N], 7);
-        ssa v = e.Zext<8>(e.ShiftLeft(e.state[Flag_V], 6));
-        ssa m = e.Zext<8>(e.ShiftLeft(e.Ternary(e.state[Flag_E], e.Const<1>(1), e.state[Flag_M]), 5));
-        ssa x = e.Zext<8>(e.ShiftLeft(e.Ternary(e.state[Flag_E], e.Const<1>(1), e.state[Flag_X]), 4));
-        ssa d = e.Zext<8>(e.ShiftLeft(e.state[Flag_D], 3));
-        ssa i = e.Zext<8>(e.ShiftLeft(e.state[Flag_I], 2));
-        ssa z = e.Zext<8>(e.ShiftLeft(e.state[Flag_Z], 1));
-        ssa c = e.Zext<8>(e.state[Flag_C]);
-
-        // Zip all the flags together
-        return e.Or(e.Or(e.Or(n, v), e.Or(m, x)), e.Or(e.Or(d, i), e.Or(z, c)));
-    });
-    pull("PLP", 0x28, STACK_8, [] (Emitter &e, ssa val) {
-        e.state[Flag_N] = e.Extract(val, 7, 1);
-        e.state[Flag_V] = e.Extract(val, 6, 1);
-        e.state[Flag_M] = e.Ternary(e.state[Flag_E], e.state[Flag_M], e.Extract(val, 5, 1));
-        e.state[Flag_X] = e.Ternary(e.state[Flag_E], e.state[Flag_X], e.Extract(val, 4, 1));
-        e.state[Flag_D] = e.Extract(val, 3, 1);
-        e.state[Flag_I] = e.Extract(val, 2, 1);
-        e.state[Flag_Z] = e.Extract(val, 1, 1);
-        e.state[Flag_C] = e.Extract(val, 0, 1);
-    });
+    push("PHP", 0x08, STACK_8,  [] (Emitter &e) { return pack_flags(e); });
+    pull("PLP", 0x28, STACK_8,  [] (Emitter &e, ssa val) { unpack_flags(e, val); });
     push("PHA", 0x48, STACK_M,  [] (Emitter &e) { return e.Cat(e.state[A], e.state[B]); });
     pull("PLA", 0x68, STACK_M,  [] (Emitter &e, ssa val) { /* Handled as a special case */ });
     push("PHY", 0x5A, STACK_X,  [] (Emitter &e) { return e.state[Y]; });
@@ -546,8 +525,8 @@ void populate_tables() {
     pull("PLD", 0x2B, STACK_16, [] (Emitter &e, ssa val) { e.state[D] = val; });
     push("PHK", 0x4B, STACK_8,  [] (Emitter &e) { return e.state[PBR]; });
     // There is no PLK
-    push("PHD", 0x8B, STACK_8, [] (Emitter &e) { return e.state[DBR]; });
-    pull("PLD", 0xAB, STACK_8, [] (Emitter &e, ssa val) { e.state[DBR] = val; });
+    push("PHD", 0x8B, STACK_8,  [] (Emitter &e) { return e.state[DBR]; });
+    pull("PLD", 0xAB, STACK_8,  [] (Emitter &e, ssa val) { e.state[DBR] = val; });
 
     // Unconditional Jump Instructions:
     //       a    al   (a)   (a,x)
@@ -631,14 +610,7 @@ void populate_tables() {
 
         // Read status register
         ssa val = e.Read(e.Cat(e.Const<8>(0), e.state[S]));
-        e.state[Flag_N] = e.Extract(val, 7, 1);
-        e.state[Flag_V] = e.Extract(val, 6, 1);
-        e.state[Flag_M] = e.Ternary(e.state[Flag_E], e.state[Flag_M], e.Extract(val, 5, 1));
-        e.state[Flag_X] = e.Ternary(e.state[Flag_E], e.state[Flag_X], e.Extract(val, 4, 1));
-        e.state[Flag_D] = e.Extract(val, 3, 1);
-        e.state[Flag_I] = e.Extract(val, 2, 1);
-        e.state[Flag_Z] = e.Extract(val, 1, 1);
-        e.state[Flag_C] = e.Extract(val, 0, 1);
+        unpack_flags(e, val);
         modifyStack(e, +1);
         e.IncCycle();
 

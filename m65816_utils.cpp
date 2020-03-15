@@ -278,4 +278,31 @@ void storeReg16(Emitter &e, Reg reg, ssa value, bool force16) {
     }
 }
 
+// Takes the current flags and packs them into a 8bit value
+ssa pack_flags(Emitter& e) {
+    ssa n = e.ShiftLeft(e.state[Flag_N], 7);
+    ssa v = e.Zext<8>(e.ShiftLeft(e.state[Flag_V], 6));
+    ssa m = e.Zext<8>(e.ShiftLeft(e.Ternary(e.state[Flag_E], e.Const<1>(1), e.state[Flag_M]), 5));
+    ssa x = e.Zext<8>(e.ShiftLeft(e.Ternary(e.state[Flag_E], e.Const<1>(1), e.state[Flag_X]), 4));
+    ssa d = e.Zext<8>(e.ShiftLeft(e.state[Flag_D], 3));
+    ssa i = e.Zext<8>(e.ShiftLeft(e.state[Flag_I], 2));
+    ssa z = e.Zext<8>(e.ShiftLeft(e.state[Flag_Z], 1));
+    ssa c = e.Zext<8>(e.state[Flag_C]);
+
+    // Zip all the flags together
+    return e.Or(e.Or(e.Or(n, v), e.Or(m, x)), e.Or(e.Or(d, i), e.Or(z, c)));
+}
+
+// Unpack flags from a value
+void unpack_flags(Emitter& e, ssa val) {
+    e.state[Flag_N] = e.Extract(val, 7, 1);
+    e.state[Flag_V] = e.Extract(val, 6, 1);
+    e.state[Flag_M] = e.Ternary(e.state[Flag_E], e.state[Flag_M], e.Extract(val, 5, 1));
+    e.state[Flag_X] = e.Ternary(e.state[Flag_E], e.state[Flag_X], e.Extract(val, 4, 1));
+    e.state[Flag_D] = e.Extract(val, 3, 1);
+    e.state[Flag_I] = e.Extract(val, 2, 1);
+    e.state[Flag_Z] = e.Extract(val, 1, 1);
+    e.state[Flag_C] = e.Extract(val, 0, 1);
+}
+
 }

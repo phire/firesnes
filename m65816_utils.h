@@ -72,4 +72,11 @@ ssa loadReg16(Emitter &e, Reg reg, bool force16 = false);
 // two 8 bit memory operations.
 // Handles any complexities with the M and X flags.
 void storeReg16(Emitter &e, Reg reg, ssa value, bool force16 = false);
+
+// Takes the current flags and packs them into a 8bit value
+ssa pack_flags(Emitter& e);
+
+// Unpack flags from a value
+void unpack_flags(Emitter& e, ssa val);
+
 }
