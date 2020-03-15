@@ -6,7 +6,14 @@ enable_testing()
 
 
 
-add_executable(firesnes main.cpp m65816.cpp m65816_addressing.cpp ir_interpreter.cpp)
+add_executable(firesnes
+    main.cpp
+    m65816.cpp
+    m65816_addressing.cpp
+    m65816_emitter.cpp
+    m65816_utils.cpp
+    ir_interpreter.cpp
+)
 
 set_property(TARGET firesnes PROPERTY CXX_STANDARD 17)
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
