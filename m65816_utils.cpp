@@ -192,10 +192,8 @@ ssa loadReg16(Emitter &e, Reg reg, bool force16) {
         return e.Cat(e.state[B], e.state[A]);
     case X:
     case Y:
-        if (force16)
-            return e.state[reg];
-        // The upper bits are forced to zero when Flag_X are set to
-        return e.Ternary(e.state[Flag_X], e.Cat(e.Const<8>(0), e.Extract(e.state[reg], 0, 8)), e.state[reg]);
+        // The upper bits have already been forced to zero
+        return e.state[reg];
     case PBR:
     case DBR: {
         // These registers are always 8bit
@@ -238,8 +236,6 @@ void storeReg16(Emitter &e, Reg reg, ssa value, bool force16) {
     }
     case X:
     case Y: {
-        ssa old_upper = e.Extract(e.state[reg], 8, 8);
-
         // Do the 16bit write first
         e.state[reg] = value;
         nz_flags16(e, value); // All writes to A/B modify flags
@@ -249,7 +245,9 @@ void storeReg16(Emitter &e, Reg reg, ssa value, bool force16) {
         // Fall back to an 8bit write when Flag_X is 1
         e.If(e.state[Flag_X], [&] () {
             ssa low = e.Extract(value, 0, 8);
-            e.state[reg] = e.Cat(old_upper, low);
+            // This isn't fully accurate. The real 65816 apparently doesn't touch the upper bits
+            // But there is no way to load anything other than zero, so lets simplify
+            e.state[reg] = e.Cat(e.Const<8>(0), low);
             nz_flags(e, low);
         });
         return;
