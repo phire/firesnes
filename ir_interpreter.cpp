@@ -3,6 +3,7 @@
 #include <vector>
 #include <cassert>
 #include <array>
+#include <stdio.h>
 
 std::array<u64, 32> registers;
 std::array<u8, 0xffff> memory;

@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 #include <cassert>
+#include <string>
 
 #include "m65816_emitter.h"
 #include "m65816_utils.h"
@@ -18,7 +19,7 @@ void populate_tables() {
     auto insert = [&] (size_t opcode, std::string name, std::function<void(Emitter&)>&& fn) {
         gen_table[opcode] = std::move(fn);
         if (name_table[opcode] != "") {
-            printf("Overwriting %s at %x with %s\n", name_table[opcode].c_str(), opcode, name.c_str());
+            printf("Overwriting %s at %x with %s\n", name_table[opcode].c_str(), (unsigned)opcode, name.c_str());
         }
         name_table[opcode] = name;
     };
@@ -719,8 +720,8 @@ void interpeter_loop() {
 
         u8 opcode = memory[pc];
 
-        u64 nes_cycle    = (cycle * 3) % 341;
-        u64 nes_scanline = ((341 * 242 + (cycle * 3)) / 341) % 262 - 1;
+        u32 nes_cycle    = (cycle * 3) % 341;
+        u32 nes_scanline = ((341 * 242 + (cycle * 3)) / 341) % 262 - 1;
         printf("%04X  %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%3i SL:%i\n", pc, opcode, a, x, y, p, sp, nes_cycle, nes_scanline);
 
         m65816::emit(e, opcode);
@@ -764,7 +765,7 @@ void interpeter_loop() {
 
 void load_nestest() {
     FILE *f = fopen("nestest.nes", "rb");
-    assert(f > 0);
+    assert(f != nullptr);
 
     fseek(f, 16, SEEK_SET); // Skip header
 
@@ -845,7 +846,7 @@ int main(int, char**) {
             printarg(ir.arg_3);
             printf("\n");
         } else if (ir.id == 0x8000) {
-            printf("const48 %x\n", ir.arg_48);
+            printf("const48 %lx\n", ir.arg_48);
         } else if (ir.id == Const) {
             // Don't print consts, because printarg inlines them
             //printf("const%i %x\n", ir.num_bits, ir.arg_32);
