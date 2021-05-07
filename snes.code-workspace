@@ -71,7 +71,14 @@
 			"typeinfo": "cpp",
 			"valarray": "cpp",
 			"variant": "cpp",
-			"*.rh": "cpp"
+			"*.rh": "cpp",
+			"csignal": "cpp",
+			"strstream": "cpp",
+			"compare": "cpp",
+			"concepts": "cpp",
+			"forward_list": "cpp",
+			"ranges": "cpp",
+			"stop_token": "cpp"
 		}
 	}
 }

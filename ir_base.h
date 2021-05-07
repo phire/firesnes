@@ -33,7 +33,9 @@ enum Opcode {
     store16, // mem, offset, data
     store8,  // mem, offset, data
 
-
+    // Non-memory state
+    stateRead,  // offset, size
+    stateWrite, // offset, size, data
 
     Ternary, // condition, true, false
 
@@ -68,6 +70,8 @@ inline const char* OpcodeName(u16 op) {
     case store32: return "store32";
     case store16: return "store16";
     case store8: return "store8";
+    case stateRead: return "stateRead";
+    case stateWrite: return "stateWrite";
     case Ternary: return "ternary";
     case Assert: return "assert";
     case Const48: return "Const48";
@@ -181,6 +185,8 @@ using IR_Store8 = IR3<Opcode::store8>;
 using IR_Store16 = IR3<Opcode::store16>;
 using IR_Store32 = IR3<Opcode::store32>;
 using IR_Store64 = IR3<Opcode::store64>;
+using IR_StateRead = IR2<Opcode::stateRead>;
+using IR_StateWrite = IR3<Opcode::stateWrite>;
 using IR_Assert = IR2<Opcode::Assert>;
 using IR_Neq = IR2<Opcode::Neq>;
 using IR_Eq  = IR2<Opcode::Eq>;

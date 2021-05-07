@@ -2,6 +2,8 @@
 
 #include "ir_base.h"
 
+#include <map>
+
 class BaseEmitter {
 protected:
     ssa push(IR_Base&& ir) {
@@ -85,6 +87,16 @@ public:
     }
     ssa Sub(ssa a, ssa b) {
         return push(IR_Sub(a, b));
+    }
+
+    template <u8 bits>
+    ssa StateRead(size_t offset) {
+        return push(IR_StateRead(Const<32>(offset), Const<8>(bits)));
+    }
+
+    template <u8 bits>
+    void StateWrite(size_t offset, ssa value) {
+        push(IR_StateWrite(Const<32>(offset), Const<8>(bits), value));
     }
 
     ssa Ternary(ssa cond, ssa a, ssa b) {
