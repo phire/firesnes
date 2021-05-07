@@ -33,6 +33,7 @@ enum Opcode {
     store16, // mem, offset, data
     store8,  // mem, offset, data
 
+    // FIXME: This is wrong. we already have namespaced memory regions with memState... just use that.
     // Non-memory state
     stateRead,  // offset, size
     stateWrite, // offset, size, data
